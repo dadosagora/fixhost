@@ -1,27 +1,38 @@
+// src/layout/AppLayout.jsx  ||  src/layout/Layout.jsx
 import { NavLink, Outlet } from "react-router-dom";
 import { supabase } from "../lib/supabase";
 
 export default function AppLayout() {
   return (
     // 1 coluna no mobile; 2 colunas a partir de md
-    <div className="min-h-dvh grid md:grid-cols-[260px_1fr]">
-      <aside className="bg-gray-900 text-white p-4 space-y-3 md:min-h-dvh">
+    <div className="min-h-dvh grid md:grid-cols-[220px_1fr]">
+      {/* Cabeçalho/Sidebar (fica no topo no mobile) */}
+      <aside className="bg-slate-900 text-white border-b border-slate-800 md:border-b-0 p-3 md:p-4 space-y-2 md:min-h-dvh">
         <div className="flex items-center justify-between gap-3">
-          <h1 className="text-lg font-bold">🏨 FixHost</h1>
+          <div className="flex items-center gap-2">
+            <img
+              src="/logo-32.png"
+              alt="FixHost"
+              className="w-6 h-6 rounded"
+            />
+            <h1 className="text-base md:text-lg font-semibold">FixHost</h1>
+          </div>
           <button
             onClick={() => supabase.auth.signOut()}
-            className="shrink-0 bg-white/10 hover:bg-white/20 rounded px-3 py-1 text-sm"
+            className="shrink-0 bg-white/10 hover:bg-white/20 rounded px-2.5 py-1 text-xs md:text-sm"
+            aria-label="Sair"
           >
             Sair
           </button>
         </div>
 
-        <nav className="flex md:flex-col gap-2 overflow-x-auto">
+        {/* Navegação mais compacta */}
+        <nav className="flex flex-wrap md:flex-col gap-2 md:gap-1">
           <NavLink
             to="/app/dashboard"
             className={({ isActive }) =>
-              `px-3 py-2 rounded whitespace-nowrap ${
-                isActive ? "bg-gray-800" : "hover:bg-gray-800/60"
+              `px-2.5 py-1.5 rounded text-sm ${
+                isActive ? "bg-slate-800" : "hover:bg-slate-800/60"
               }`
             }
           >
@@ -30,8 +41,8 @@ export default function AppLayout() {
           <NavLink
             to="/app/chamados"
             className={({ isActive }) =>
-              `px-3 py-2 rounded whitespace-nowrap ${
-                isActive ? "bg-gray-800" : "hover:bg-gray-800/60"
+              `px-2.5 py-1.5 rounded text-sm ${
+                isActive ? "bg-slate-800" : "hover:bg-slate-800/60"
               }`
             }
           >
@@ -40,8 +51,8 @@ export default function AppLayout() {
           <NavLink
             to="/app/quartos"
             className={({ isActive }) =>
-              `px-3 py-2 rounded whitespace-nowrap ${
-                isActive ? "bg-gray-800" : "hover:bg-gray-800/60"
+              `px-2.5 py-1.5 rounded text-sm ${
+                isActive ? "bg-slate-800" : "hover:bg-slate-800/60"
               }`
             }
           >
@@ -50,8 +61,8 @@ export default function AppLayout() {
           <NavLink
             to="/app/usuarios"
             className={({ isActive }) =>
-              `px-3 py-2 rounded whitespace-nowrap ${
-                isActive ? "bg-gray-800" : "hover:bg-gray-800/60"
+              `px-2.5 py-1.5 rounded text-sm ${
+                isActive ? "bg-slate-800" : "hover:bg-slate-800/60"
               }`
             }
           >
@@ -60,6 +71,7 @@ export default function AppLayout() {
         </nav>
       </aside>
 
+      {/* Conteúdo */}
       <main className="bg-gray-50 p-4 md:p-6">
         <div className="mx-auto max-w-6xl">
           <Outlet />
