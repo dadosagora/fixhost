@@ -1,11 +1,12 @@
 // src/pages/Tickets.jsx
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import { supabase } from "../lib/supabase";
 import StatusBadge from "../components/StatusBadge";
 import PriorityBadge from "../components/PriorityBadge";
 
 const CATS = ["Elétrica","Hidráulica","Mobiliário","Climatização","Limpeza","Outros"];
 const MAX_PHOTOS = 5;
+const BUCKET_NAME = "tickets"; // <-- se seu bucket tiver outro nome, troque aqui
 
 /** Comprime imagem no cliente (≈1280px, jpeg qualidade 0.7) */
 async function compressImage(file, maxSize = 1280, quality = 0.7) {
@@ -33,19 +34,33 @@ async function compressImage(file, maxSize = 1280, quality = 0.7) {
 
 /** Envia fotos ao Storage e retorna URLs públicas */
 async function uploadPhotos(ticketId, files) {
-  const out = [];
+  const urls = [];
   for (const f of files.slice(0, MAX_PHOTOS)) {
     const compressed = await compressImage(f);
     const path = `ticket_${ticketId}/${Date.now()}_${Math.random().toString(36).slice(2)}.jpg`;
-    const { error } = await supabase.storage.from("tickets").upload(path, compressed, {
+    const { error } = await supabase.storage.from(BUCKET_NAME).upload(path, compressed, {
       contentType: "image/jpeg",
       upsert: true,
     });
-    if (error) throw error;
-    const { data } = supabase.storage.from("tickets").getPublicUrl(path);
-    out.push(data.publicUrl);
+    if (error) {
+      // erro clássico quando bucket não existe: "Bucket not found"
+      throw new Error(error.message || "Falha no upload");
+    }
+    const { data } = supabase.storage.from(BUCKET_NAME).getPublicUrl(path);
+    urls.push(data.publicUrl);
   }
-  return out;
+  return urls;
+}
+
+function Thumbs({ files }) {
+  if (!files?.length) return null;
+  return (
+    <div className="flex gap-2 flex-wrap mt-2">
+      {Array.from(files).slice(0, MAX_PHOTOS).map((f, i) => (
+        <img key={i} src={URL.createObjectURL(f)} alt="" className="h-16 w-16 object-cover rounded border" />
+      ))}
+    </div>
+  );
 }
 
 export default function Tickets() {
@@ -56,10 +71,15 @@ export default function Tickets() {
   const [detail, setDetail] = useState(null);
 
   const [form, setForm] = useState({ room_id: "", category: CATS[0], priority: "media", title: "", description: "" });
-  const [newPhotos, setNewPhotos] = useState([]);           // fotos no form de criação
-
+  const [newPhotos, setNewPhotos] = useState([]);        // fotos do formulário de criação
   const [comment, setComment] = useState("");
-  const [detailPhotos, setDetailPhotos] = useState([]);     // fotos no painel de detalhe
+  const [detailPhotos, setDetailPhotos] = useState([]);  // fotos no painel de detalhe
+
+  // refs pros inputs "invisíveis"
+  const galleryCreateRef = useRef(null);
+  const cameraCreateRef  = useRef(null);
+  const galleryDetailRef = useRef(null);
+  const cameraDetailRef  = useRef(null);
 
   useEffect(() => { load(); }, []);
 
@@ -76,6 +96,12 @@ export default function Tickets() {
     const matchP = filter.priority === "todas" ? true : t.priority === filter.priority;
     return matchQ && matchS && matchP;
   }), [tickets, filter]);
+
+  function appendFiles(setter, current, fileList) {
+    const incoming = Array.from(fileList || []);
+    const merged = [...current, ...incoming].slice(0, MAX_PHOTOS);
+    setter(merged);
+  }
 
   async function createTicket(e) {
     e.preventDefault();
@@ -95,19 +121,17 @@ export default function Tickets() {
 
     if (error) { alert("Erro ao salvar: " + error.message); return; }
 
-    // envia fotos (se houver) e cria updates com photo_url
     if (newPhotos.length) {
       try {
         const urls = await uploadPhotos(data.id, newPhotos);
         for (const url of urls) {
           await supabase.from("ticket_updates").insert({
-            ticket_id: data.id,
-            comment: "Foto anexada",
-            created_by: user.id,
-            photo_url: url,
+            ticket_id: data.id, comment: "Foto anexada", created_by: user.id, photo_url: url,
           });
         }
-      } catch (err) { alert("Erro ao enviar fotos: " + err.message); }
+      } catch (err) {
+        alert("Erro ao enviar fotos: " + err.message); // aqui aparece “Bucket not found” se o bucket não existir
+      }
     }
 
     setCreating(false);
@@ -147,10 +171,7 @@ export default function Tickets() {
         const urls = await uploadPhotos(ticket.id, detailPhotos);
         for (const url of urls) {
           await supabase.from("ticket_updates").insert({
-            ticket_id: ticket.id,
-            comment: "Foto anexada",
-            created_by: user.id,
-            photo_url: url,
+            ticket_id: ticket.id, comment: "Foto anexada", created_by: user.id, photo_url: url,
           });
         }
       } catch (err) { alert("Erro ao enviar fotos: " + err.message); }
@@ -159,17 +180,6 @@ export default function Tickets() {
     setComment("");
     setDetailPhotos([]);
     alert("Atualização enviada ✅");
-  }
-
-  function Thumbs({ files }) {
-    if (!files?.length) return null;
-    return (
-      <div className="flex gap-2 flex-wrap mt-2">
-        {Array.from(files).slice(0, MAX_PHOTOS).map((f, i) => (
-          <img key={i} src={URL.createObjectURL(f)} alt="" className="h-16 w-16 object-cover rounded border" />
-        ))}
-      </div>
-    );
   }
 
   return (
@@ -323,24 +333,33 @@ export default function Tickets() {
                 onChange={(e) => setForm({ ...form, description: e.target.value })} required />
             </div>
 
-            {/* Fotos (até 5) */}
+            {/* FOTOS: dois botões (Galeria / Câmera) */}
             <div className="md:col-span-2">
               <label className="text-sm text-slate-600 block mb-1">Fotos (até 5)</label>
-              <input
-                type="file"
-                accept="image/*"
-                capture="environment"
-                multiple
-                onChange={(e) => setNewPhotos(Array.from(e.target.files || []).slice(0, MAX_PHOTOS))}
-                className="block w-full border rounded-lg px-3 py-2"
-              />
+
+              <div className="flex gap-2 mb-2">
+                <button type="button" className="border rounded-lg px-3 py-2" onClick={() => galleryCreateRef.current?.click()}>
+                  Escolher da galeria
+                </button>
+                <button type="button" className="border rounded-lg px-3 py-2" onClick={() => cameraCreateRef.current?.click()}>
+                  Tirar foto agora
+                </button>
+              </div>
+
+              {/* inputs escondidos */}
+              <input ref={galleryCreateRef} type="file" accept="image/*" multiple className="hidden"
+                onChange={(e) => appendFiles(setNewPhotos, newPhotos, e.target.files)} />
+              <input ref={cameraCreateRef} type="file" accept="image/*" capture="environment" className="hidden"
+                onChange={(e) => appendFiles(setNewPhotos, newPhotos, e.target.files)} />
+
               <Thumbs files={newPhotos} />
               <p className="text-xs text-slate-500 mt-1">As imagens serão comprimidas antes do envio.</p>
             </div>
           </div>
 
           <div className="flex gap-2 justify-end">
-            <button type="button" className="border rounded-lg px-3 py-2" onClick={() => { setCreating(false); setNewPhotos([]); }}>
+            <button type="button" className="border rounded-lg px-3 py-2"
+              onClick={() => { setCreating(false); setNewPhotos([]); }}>
               Cancelar
             </button>
             <button className="bg-slate-900 text-white rounded-lg px-3 py-2">Salvar chamado</button>
@@ -383,24 +402,26 @@ export default function Tickets() {
             {/* Atualização + fotos */}
             <div className="pt-2 space-y-2">
               <div className="text-sm font-medium text-slate-700">Adicionar atualização</div>
-              <input
-                className="border rounded-lg px-3 py-2 w-full"
-                placeholder="Comentário"
-                value={comment}
-                onChange={(e) => setComment(e.target.value)}
-              />
-              <div>
-                <label className="text-sm text-slate-600 block mb-1">Fotos (até 5)</label>
-                <input
-                  type="file"
-                  accept="image/*"
-                  capture="environment"
-                  multiple
-                  onChange={(e) => setDetailPhotos(Array.from(e.target.files || []).slice(0, MAX_PHOTOS))}
-                  className="block w-full border rounded-lg px-3 py-2"
-                />
-                <Thumbs files={detailPhotos} />
+              <input className="border rounded-lg px-3 py-2 w-full" placeholder="Comentário"
+                value={comment} onChange={(e) => setComment(e.target.value)} />
+
+              <div className="flex gap-2">
+                <button type="button" className="border rounded-lg px-3 py-2" onClick={() => galleryDetailRef.current?.click()}>
+                  Galeria
+                </button>
+                <button type="button" className="border rounded-lg px-3 py-2" onClick={() => cameraDetailRef.current?.click()}>
+                  Câmera
+                </button>
               </div>
+
+              {/* inputs escondidos */}
+              <input ref={galleryDetailRef} type="file" accept="image/*" multiple className="hidden"
+                onChange={(e) => appendFiles(setDetailPhotos, detailPhotos, e.target.files)} />
+              <input ref={cameraDetailRef} type="file" accept="image/*" capture="environment" className="hidden"
+                onChange={(e) => appendFiles(setDetailPhotos, detailPhotos, e.target.files)} />
+
+              <Thumbs files={detailPhotos} />
+
               <div className="flex justify-end">
                 <button className="border rounded-lg px-3 py-2" onClick={() => addUpdate(detail)}>Enviar</button>
               </div>
