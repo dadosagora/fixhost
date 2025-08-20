@@ -17,10 +17,14 @@ export default function Tickets() {
   useEffect(() => { load(); }, []);
 
   async function load() {
-    const { data: roomsData } = await supabase.from("rooms").select("*").order("code", { ascending: true });
+    const { data: roomsData, error: roomsErr } = await supabase
+      .from("rooms").select("*").order("code", { ascending: true });
+    if (roomsErr) console.error(roomsErr);
     setRooms(roomsData || []);
 
-    const { data: ticketsData } = await supabase.from("tickets").select("*").order("created_at", { ascending: false });
+    const { data: ticketsData, error: tErr } = await supabase
+      .from("tickets").select("*").order("created_at", { ascending: false });
+    if (tErr) console.error(tErr);
     setTickets(ticketsData || []);
   }
 
@@ -33,48 +37,55 @@ export default function Tickets() {
 
   async function createTicket(e) {
     e.preventDefault();
-    if (!form.room_id) return;
+    if (!form.room_id) { alert("Selecione um quarto."); return; }
+
     const dueHours = form.priority === "alta" ? 24 : form.priority === "media" ? 48 : 72;
     const { data: { user } } = await supabase.auth.getUser();
 
     const { error } = await supabase.from("tickets").insert({
       ...form,
       created_by: user.id,
-      status: "aberto", // <- status válido no schema
-      due_at: new Date(Date.now() + dueHours * 3600 * 1000).toISOString()
+      status: "em_aberto", // ⚠️ enum do seu schema
+      due_at: new Date(Date.now() + dueHours * 3600 * 1000).toISOString(),
     });
 
-    if (!error) {
-      setCreating(false);
-      setForm({ room_id: "", category: CATS[0], priority: "media", title: "", description: "" });
-      await load();
-    } else {
+    if (error) {
       console.error(error);
+      alert("Erro ao salvar: " + error.message);
+      return;
     }
+
+    setCreating(false);
+    setForm({ room_id: "", category: CATS[0], priority: "media", title: "", description: "" });
+    await load();
+    alert("Chamado criado ✅");
   }
 
   async function updateStatus(ticket, newStatus) {
     const { error } = await supabase
       .from("tickets")
       .update({
-        status: newStatus,
-        closed_at: newStatus === "resolvido" ? new Date().toISOString() : null
+        status: newStatus, // "em_processamento" ou "resolvido"
+        closed_at: newStatus === "resolvido" ? new Date().toISOString() : null,
       })
       .eq("id", ticket.id);
 
-    if (!error) {
-      await supabase.from("ticket_updates").insert({
-        ticket_id: ticket.id,
-        old_status: ticket.status,
-        new_status: newStatus,
-        comment: newStatus === "resolvido" ? "Resolvido" : "Status atualizado",
-        created_by: (await supabase.auth.getUser()).data.user.id
-      });
-      await load();
-      setDetail(null);
-    } else {
+    if (error) {
       console.error(error);
+      alert("Erro ao atualizar status: " + error.message);
+      return;
     }
+
+    await supabase.from("ticket_updates").insert({
+      ticket_id: ticket.id,
+      old_status: ticket.status,
+      new_status: newStatus,
+      comment: newStatus === "resolvido" ? "Resolvido" : "Status atualizado",
+      created_by: (await supabase.auth.getUser()).data.user.id,
+    });
+
+    await load();
+    setDetail(null);
   }
 
   async function addUpdate(ticket) {
@@ -82,9 +93,14 @@ export default function Tickets() {
     const { error } = await supabase.from("ticket_updates").insert({
       ticket_id: ticket.id,
       comment,
-      created_by: (await supabase.auth.getUser()).data.user.id
+      created_by: (await supabase.auth.getUser()).data.user.id,
     });
-    if (!error) setComment("");
+    if (error) {
+      console.error(error);
+      alert("Erro ao adicionar comentário: " + error.message);
+      return;
+    }
+    setComment("");
   }
 
   return (
@@ -107,12 +123,9 @@ export default function Tickets() {
                 onChange={(e) => setFilter({ ...filter, status: e.target.value })}
               >
                 <option value="todos">Todos os status</option>
-                <option value="aberto">Aberto</option>
-                <option value="triagem">Triagem</option>
-                <option value="em_andamento">Em andamento</option>
-                <option value="pendente">Pendente</option>
+                <option value="em_aberto">Em aberto</option>
+                <option value="em_processamento">Em processamento</option>
                 <option value="resolvido">Resolvido</option>
-                <option value="fechado">Fechado</option>
               </select>
               <select
                 className="border rounded-lg px-3 py-2"
@@ -123,7 +136,6 @@ export default function Tickets() {
                 <option value="baixa">Baixa</option>
                 <option value="media">Média</option>
                 <option value="alta">Alta</option>
-                <option value="critica">Crítica</option>
               </select>
               <button onClick={() => setCreating(true)} className="bg-slate-900 text-white rounded-lg px-3 py-2">
                 Novo chamado
@@ -159,7 +171,7 @@ export default function Tickets() {
                       <td className="p-3 text-right">
                         <div className="flex gap-2 justify-end">
                           <button className="border rounded-lg px-3 py-1.5 text-sm" onClick={() => setDetail(t)}>Ver</button>
-                          <button className="border rounded-lg px-3 py-1.5 text-sm" onClick={() => updateStatus(t, "em_andamento")}>Processar</button>
+                          <button className="border rounded-lg px-3 py-1.5 text-sm" onClick={() => updateStatus(t, "em_processamento")}>Processar</button>
                           <button className="border rounded-lg px-3 py-1.5 text-sm" onClick={() => updateStatus(t, "resolvido")}>Resolver</button>
                         </div>
                       </td>
@@ -204,9 +216,7 @@ export default function Tickets() {
                 onChange={(e) => setForm({ ...form, category: e.target.value })}
               >
                 {CATS.map((c) => (
-                  <option key={c} value={c}>
-                    {c}
-                  </option>
+                  <option key={c} value={c}>{c}</option>
                 ))}
               </select>
             </div>
@@ -221,7 +231,6 @@ export default function Tickets() {
                 <option value="baixa">Baixa</option>
                 <option value="media">Média</option>
                 <option value="alta">Alta</option>
-                <option value="critica">Crítica</option>
               </select>
             </div>
 
@@ -290,9 +299,9 @@ export default function Tickets() {
             </div>
 
             <div className="flex flex-wrap gap-2">
-              {detail.status !== "em_andamento" && (
-                <button className="border rounded-lg px-3 py-2" onClick={() => updateStatus(detail, "em_andamento")}>
-                  Mover para andamento
+              {detail.status !== "em_processamento" && (
+                <button className="border rounded-lg px-3 py-2" onClick={() => updateStatus(detail, "em_processamento")}>
+                  Mover para processamento
                 </button>
               )}
               {detail.status !== "resolvido" && (
@@ -322,3 +331,4 @@ export default function Tickets() {
     </div>
   );
 }
+
