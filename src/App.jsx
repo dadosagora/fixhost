@@ -1,4 +1,4 @@
-// App.jsx — versão completa usando HashRouter e RoomsPage
+// App.jsx — versão completa usando HashRouter e RoomPage
 // Se o seu layout estiver em ./layout/AppLayout.jsx, troque a linha abaixo para:
 // import AppLayout from "./layout/AppLayout";
 import AppLayout from "./layout/AppLayout.jsx";
@@ -7,7 +7,7 @@ import { HashRouter, Routes, Route, Navigate } from "react-router-dom";
 import { useEffect, useState } from "react";
 import { supabase } from "./lib/supabase";
 import Login from "./pages/Login";
-import RoomsPage from "./pages/RoomsPage"; // ← novo componente de Quartos
+import RoomPage from "./pages/RoomPage"; // ← novo componente de Quartos
 
 /** Protege rotas /app/* */
 function Protected({ children }) {
@@ -94,7 +94,7 @@ export default function App() {
 
           {/* Rotas internas */}
           <Route path="chamados" element={<ChamadosPage />} />
-          <Route path="quartos" element={<RoomsPage />} />
+          <Route path="quartos" element={<RoomPage />} />
           <Route path="usuarios" element={<UsuariosPage />} />
 
           {/* fallback dentro de /app */}
