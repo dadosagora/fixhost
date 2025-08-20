@@ -1,10 +1,10 @@
-import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
+import { HashRouter, Routes, Route, Navigate } from "react-router-dom";
 import { useEffect, useState } from "react";
 import { supabase } from "./lib/supabase";
 import AppLayout from "./layout/AppLayout";
 import Login from "./pages/Login";
 
-/** Protege rotas /app/* */
+// Guard para /app/*
 function Protected({ children }) {
   const [ready, setReady] = useState(false);
   const [session, setSession] = useState(null);
@@ -25,7 +25,7 @@ function Protected({ children }) {
   return children;
 }
 
-/** ---- STUB PAGES ---- */
+/* -------- STUBS para garantir que renderize algo -------- */
 function DashboardPage() {
   return (
     <div className="space-y-6">
@@ -47,26 +47,19 @@ function DashboardPage() {
     </div>
   );
 }
-
-function ChamadosPage() {
-  return <h2 className="text-xl font-semibold">Chamados</h2>;
-}
-function QuartosPage() {
-  return <h2 className="text-xl font-semibold">Quartos</h2>;
-}
-function UsuariosPage() {
-  return <h2 className="text-xl font-semibold">Usuários</h2>;
-}
-/** ---- FIM STUBS ---- */
+function ChamadosPage() { return <h2 className="text-xl font-semibold">Chamados</h2>; }
+function QuartosPage()   { return <h2 className="text-xl font-semibold">Quartos</h2>; }
+function UsuariosPage()  { return <h2 className="text-xl font-semibold">Usuários</h2>; }
+/* ----------------- FIM STUBS ----------------- */
 
 export default function App() {
   return (
-    <BrowserRouter>
+    <HashRouter>
       <Routes>
-        {/* Login público */}
+        {/* pública */}
         <Route path="/login" element={<Login />} />
 
-        {/* Área protegida */}
+        {/* protegida */}
         <Route
           path="/app"
           element={
@@ -75,17 +68,19 @@ export default function App() {
             </Protected>
           }
         >
+          {/* /app → Dashboard por padrão */}
           <Route index element={<DashboardPage />} />
           <Route path="dashboard" element={<DashboardPage />} />
           <Route path="chamados" element={<ChamadosPage />} />
           <Route path="quartos" element={<QuartosPage />} />
           <Route path="usuarios" element={<UsuariosPage />} />
+          {/* fallback dentro de /app */}
           <Route path="*" element={<Navigate to="dashboard" replace />} />
         </Route>
 
-        {/* Fallback global */}
+        {/* fallback global */}
         <Route path="*" element={<Navigate to="/app" replace />} />
       </Routes>
-    </BrowserRouter>
+    </HashRouter>
   );
 }
