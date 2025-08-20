@@ -20,6 +20,10 @@ type LocalFile = {
 const MAX = 5;
 const BUCKET = "chamados-fotos";
 
+function isUuid(v: string) {
+  return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(v);
+}
+
 /** Util: lê um File como dataURL */
 function readAsDataURL(file: File): Promise<string> {
   return new Promise((resolve, reject) => {
@@ -30,12 +34,8 @@ function readAsDataURL(file: File): Promise<string> {
   });
 }
 
-/** Util: desenha uma imagem (via <img>) no canvas e retorna JPEG */
-async function imgToJpegViaTag(
-  file: File,
-  maxSide = 1600,
-  quality = 0.8
-): Promise<File> {
+/** Converte via <img> para JPEG */
+async function imgToJpegViaTag(file: File, maxSide = 1600, quality = 0.8): Promise<File> {
   const dataURL = await readAsDataURL(file);
   const img = new Image();
   img.decoding = "sync";
@@ -65,15 +65,12 @@ async function imgToJpegViaTag(
   return new File([blob], name, { type: "image/jpeg", lastModified: Date.now() });
 }
 
-/** Compressão segura: tenta createImageBitmap → <img> → fallback original */
+/** Compressão segura: tenta ImageBitmap → <img> → fallback original */
 async function compressSafeToJpeg(file: File, maxSide = 1600, quality = 0.8): Promise<File> {
   const type = (file.type || "").toLowerCase();
   const looksSupported = /jpeg|jpg|png|webp/.test(type);
+  if (!looksSupported) return file; // HEIC/HEIF -> manda original
 
-  // HEIC/HEIF: muitos browsers não decodificam — manda original
-  if (!looksSupported) return file;
-
-  // 1) Primeiro tenta ImageBitmap (rápido)
   try {
     const bmp = await createImageBitmap(file);
     const scale = Math.min(1, maxSide / Math.max(bmp.width, bmp.height));
@@ -91,17 +88,15 @@ async function compressSafeToJpeg(file: File, maxSide = 1600, quality = 0.8): Pr
     const name = file.name.replace(/\.(png|jpg|jpeg|webp|heic|heif)$/i, ".jpg");
     return new File([blob], name, { type: "image/jpeg", lastModified: Date.now() });
   } catch {
-    // 2) Se falhar, tenta via <img>
     try {
       return await imgToJpegViaTag(file, maxSide, quality);
     } catch {
-      // 3) Último recurso: envia original (sem quebrar o fluxo)
       return file;
     }
   }
 }
 
-/** Garante que todo File tenha um nome e tipo ok */
+/** Garante nome/tipo */
 function withSafeName(f: File) {
   const ext = (f.type?.split("/")[1] || "jpg").replace("jpeg", "jpg");
   const safe = f.name && f.name.trim().length ? f.name : `${crypto.randomUUID()}.${ext}`;
@@ -134,17 +129,12 @@ export default function FixHostPhotoPicker({ ticketId, currentUrls = [], onSaved
       return [...prev, ...take];
     });
 
-    // reset do input que foi usado (corrige bug galeria → câmera)
     if (origem === "galeria" && galleryRef.current) galleryRef.current.value = "";
     if (origem === "camera" && cameraRef.current) cameraRef.current.value = "";
   }
 
-  function onPickGallery(e: React.ChangeEvent<HTMLInputElement>) {
-    addFiles(e.target.files, "galeria");
-  }
-  function onPickCamera(e: React.ChangeEvent<HTMLInputElement>) {
-    addFiles(e.target.files, "camera");
-  }
+  function onPickGallery(e: React.ChangeEvent<HTMLInputElement>) { addFiles(e.target.files, "galeria"); }
+  function onPickCamera(e: React.ChangeEvent<HTMLInputElement>) { addFiles(e.target.files, "camera"); }
 
   // ---------- remover ----------
   function removeSelected(idx: number) {
@@ -170,9 +160,15 @@ export default function FixHostPhotoPicker({ ticketId, currentUrls = [], onSaved
         const path = pathWithBucket.slice(slash + 1);
         await supabase.storage.from(bucket).remove([path]);
       }
+
       const newExisting = existing.filter((u) => u !== url);
-      const { error: updErr } = await supabase.from("chamados").update({ fotos: newExisting }).eq("id", ticketId);
-      if (updErr) throw updErr;
+
+      // Só tenta atualizar a tabela se o ticketId for UUID
+      if (isUuid(ticketId)) {
+        const { error: updErr } = await supabase.from("chamados").update({ fotos: newExisting }).eq("id", ticketId);
+        if (updErr) throw updErr;
+      }
+
       setExisting(newExisting);
       onSaved?.(newExisting);
       alert("Foto removida.");
@@ -189,14 +185,15 @@ export default function FixHostPhotoPicker({ ticketId, currentUrls = [], onSaved
     if (busy || pending.length === 0) return;
     setBusy(true);
     try {
-      // Sempre tentar converter para JPEG compatível — com fallbacks.
       const prepared = await Promise.all(pending.map((p) => compressSafeToJpeg(p.file)));
 
+      // Path base: UUID real → <ticketId>/..., teste → debug/<ticketId>/...
+      const basePath = isUuid(ticketId) ? ticketId : `debug/${encodeURIComponent(ticketId)}`;
+
       const tasks = prepared.map(async (file) => {
-        // se por algum motivo veio sem type, força jpeg
         const type = file.type || "image/jpeg";
         const ext = (type.split("/")[1] || "jpg").replace("jpeg", "jpg");
-        const path = `${ticketId}/${crypto.randomUUID()}.${ext}`;
+        const path = `${basePath}/${crypto.randomUUID()}.${ext}`;
 
         const { error: upErr } = await supabase.storage.from(BUCKET).upload(path, file, {
           contentType: type,
@@ -216,8 +213,15 @@ export default function FixHostPhotoPicker({ ticketId, currentUrls = [], onSaved
       if (okUrls.length === 0) throw new Error("Falha ao enviar as fotos.");
 
       const merged = [...existing, ...okUrls].slice(0, MAX);
-      const { error: updErr } = await supabase.from("chamados").update({ fotos: merged }).eq("id", ticketId);
-      if (updErr) throw updErr;
+
+      // Atualiza a tabela somente quando o ID é UUID
+      if (isUuid(ticketId)) {
+        const { error: updErr } = await supabase.from("chamados").update({ fotos: merged }).eq("id", ticketId);
+        if (updErr) throw updErr;
+      } else {
+        // modo teste: apenas informa
+        console.info("[TESTE] ticketId não é UUID; URLs salvas só no Storage:", okUrls);
+      }
 
       // limpa previews
       pending.forEach((p) => URL.revokeObjectURL(p.previewUrl));
@@ -227,7 +231,7 @@ export default function FixHostPhotoPicker({ ticketId, currentUrls = [], onSaved
 
       if (galleryRef.current) galleryRef.current.value = "";
       if (cameraRef.current) cameraRef.current.value = "";
-      alert("Fotos enviadas com sucesso!");
+      alert(isUuid(ticketId) ? "Fotos enviadas com sucesso!" : "Fotos enviadas (modo teste: não salvou na tabela).");
     } catch (e: any) {
       console.error("[uploadAll] ERRO:", e);
       alert(e?.message || "Erro ao enviar fotos.");
@@ -279,7 +283,6 @@ export default function FixHostPhotoPicker({ ticketId, currentUrls = [], onSaved
       </div>
 
       <div style={{ display: "flex", gap: 12, flexWrap: "wrap", alignItems: "center" }}>
-        {/* Galeria — prefira tipos mais compatíveis */}
         <label style={btn}>
           Adicionar da galeria
           <input
@@ -293,7 +296,6 @@ export default function FixHostPhotoPicker({ ticketId, currentUrls = [], onSaved
           />
         </label>
 
-        {/* Câmera */}
         <label style={btn}>
           Usar câmera
           <input
