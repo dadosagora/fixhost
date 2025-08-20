@@ -1,3 +1,4 @@
+// src/pages/Tickets.jsx
 import React, { useEffect, useMemo, useState } from "react";
 import { supabase } from "../lib/supabase";
 import StatusBadge from "../components/StatusBadge";
@@ -17,14 +18,9 @@ export default function Tickets() {
   useEffect(() => { load(); }, []);
 
   async function load() {
-    const { data: roomsData, error: roomsErr } = await supabase
-      .from("rooms").select("*").order("code", { ascending: true });
-    if (roomsErr) console.error(roomsErr);
+    const { data: roomsData } = await supabase.from("rooms").select("*").order("code", { ascending: true });
     setRooms(roomsData || []);
-
-    const { data: ticketsData, error: tErr } = await supabase
-      .from("tickets").select("*").order("created_at", { ascending: false });
-    if (tErr) console.error(tErr);
+    const { data: ticketsData } = await supabase.from("tickets").select("*").order("created_at", { ascending: false });
     setTickets(ticketsData || []);
   }
 
@@ -38,44 +34,25 @@ export default function Tickets() {
   async function createTicket(e) {
     e.preventDefault();
     if (!form.room_id) { alert("Selecione um quarto."); return; }
-
     const dueHours = form.priority === "alta" ? 24 : form.priority === "media" ? 48 : 72;
     const { data: { user } } = await supabase.auth.getUser();
-
     const { error } = await supabase.from("tickets").insert({
       ...form,
       created_by: user.id,
-      status: "em_aberto", // ⚠️ enum do seu schema
+      status: "em_aberto",
       due_at: new Date(Date.now() + dueHours * 3600 * 1000).toISOString(),
     });
-
-    if (error) {
-      console.error(error);
-      alert("Erro ao salvar: " + error.message);
-      return;
-    }
-
+    if (error) { alert("Erro ao salvar: " + error.message); return; }
     setCreating(false);
     setForm({ room_id: "", category: CATS[0], priority: "media", title: "", description: "" });
     await load();
-    alert("Chamado criado ✅");
   }
 
   async function updateStatus(ticket, newStatus) {
-    const { error } = await supabase
-      .from("tickets")
-      .update({
-        status: newStatus, // "em_processamento" ou "resolvido"
-        closed_at: newStatus === "resolvido" ? new Date().toISOString() : null,
-      })
+    const { error } = await supabase.from("tickets")
+      .update({ status: newStatus, closed_at: newStatus === "resolvido" ? new Date().toISOString() : null })
       .eq("id", ticket.id);
-
-    if (error) {
-      console.error(error);
-      alert("Erro ao atualizar status: " + error.message);
-      return;
-    }
-
+    if (error) { alert("Erro ao atualizar status: " + error.message); return; }
     await supabase.from("ticket_updates").insert({
       ticket_id: ticket.id,
       old_status: ticket.status,
@@ -83,52 +60,43 @@ export default function Tickets() {
       comment: newStatus === "resolvido" ? "Resolvido" : "Status atualizado",
       created_by: (await supabase.auth.getUser()).data.user.id,
     });
-
     await load();
     setDetail(null);
   }
 
   async function addUpdate(ticket) {
     if (!comment) return;
-    const { error } = await supabase.from("ticket_updates").insert({
-      ticket_id: ticket.id,
-      comment,
-      created_by: (await supabase.auth.getUser()).data.user.id,
-    });
-    if (error) {
-      console.error(error);
-      alert("Erro ao adicionar comentário: " + error.message);
-      return;
-    }
+    const { error } = await supabase.from("ticket_updates")
+      .insert({ ticket_id: ticket.id, comment, created_by: (await supabase.auth.getUser()).data.user.id });
+    if (error) { alert("Erro ao adicionar comentário: " + error.message); return; }
     setComment("");
   }
 
   return (
-    <div>
+    <div className="space-y-4">
+      {/* LISTA / FILTROS */}
       {!creating && !detail && (
-        <div className="space-y-4">
-          <div className="flex flex-col md:flex-row gap-2 md:items-center md:justify-between">
-            <div className="flex items-center gap-2 w-full md:w-1/2">
-              <input
-                className="border rounded-lg px-3 py-2 w-full"
-                placeholder="Buscar por título ou descrição"
-                value={filter.q}
-                onChange={(e) => setFilter({ ...filter, q: e.target.value })}
-              />
-            </div>
-            <div className="flex items-center gap-2">
+        <>
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+            <input
+              className="border rounded-lg px-3 py-2 w-full"
+              placeholder="Buscar por título ou descrição"
+              value={filter.q}
+              onChange={(e) => setFilter({ ...filter, q: e.target.value })}
+            />
+            <select
+              className="border rounded-lg px-3 py-2"
+              value={filter.status}
+              onChange={(e) => setFilter({ ...filter, status: e.target.value })}
+            >
+              <option value="todos">Todos os status</option>
+              <option value="em_aberto">Em aberto</option>
+              <option value="em_processamento">Em processamento</option>
+              <option value="resolvido">Resolvido</option>
+            </select>
+            <div className="flex gap-2">
               <select
-                className="border rounded-lg px-3 py-2"
-                value={filter.status}
-                onChange={(e) => setFilter({ ...filter, status: e.target.value })}
-              >
-                <option value="todos">Todos os status</option>
-                <option value="em_aberto">Em aberto</option>
-                <option value="em_processamento">Em processamento</option>
-                <option value="resolvido">Resolvido</option>
-              </select>
-              <select
-                className="border rounded-lg px-3 py-2"
+                className="border rounded-lg px-3 py-2 flex-1"
                 value={filter.priority}
                 onChange={(e) => setFilter({ ...filter, priority: e.target.value })}
               >
@@ -137,13 +105,46 @@ export default function Tickets() {
                 <option value="media">Média</option>
                 <option value="alta">Alta</option>
               </select>
-              <button onClick={() => setCreating(true)} className="bg-slate-900 text-white rounded-lg px-3 py-2">
+              <button
+                onClick={() => setCreating(true)}
+                className="bg-slate-900 text-white rounded-lg px-3 py-2 shrink-0"
+              >
                 Novo chamado
               </button>
             </div>
           </div>
 
-          <div className="rounded-2xl overflow-hidden border bg-white shadow-sm">
+          {/* Cards mobile */}
+          <ul className="md:hidden space-y-3">
+            {filtered.map((t) => (
+              <li key={t.id} className="rounded-xl border bg-white p-3 shadow-sm">
+                <div className="flex items-center justify-between gap-2">
+                  <div className="font-semibold">
+                    #{t.id} • {rooms.find((r) => r.id === t.room_id)?.code || "—"}
+                  </div>
+                  <StatusBadge status={t.status} />
+                </div>
+                <div className="text-sm text-slate-600 mt-1">
+                  {t.category} • <PriorityBadge value={t.priority} />
+                </div>
+                <div className="text-sm mt-1">{t.title || "—"}</div>
+                <div className="text-xs text-slate-500 mt-2">
+                  {new Date(t.created_at).toLocaleString()}
+                </div>
+                <div className="flex gap-2 justify-end mt-3">
+                  <button className="border rounded-lg px-3 py-1.5 text-sm" onClick={() => setDetail(t)}>Ver</button>
+                  <button className="border rounded-lg px-3 py-1.5 text-sm" onClick={() => updateStatus(t, "em_processamento")}>Processar</button>
+                  <button className="border rounded-lg px-3 py-1.5 text-sm" onClick={() => updateStatus(t, "resolvido")}>Resolver</button>
+                </div>
+              </li>
+            ))}
+            {filtered.length === 0 && (
+              <li className="text-center text-sm text-slate-600">Nenhum chamado encontrado.</li>
+            )}
+          </ul>
+
+          {/* Tabela desktop */}
+          <div className="hidden md:block rounded-2xl overflow-hidden border bg-white shadow-sm">
             <div className="overflow-x-auto">
               <table className="w-full text-sm">
                 <thead className="bg-slate-50 text-slate-600">
@@ -184,9 +185,10 @@ export default function Tickets() {
               </table>
             </div>
           </div>
-        </div>
+        </>
       )}
 
+      {/* Formulário de criação */}
       {creating && (
         <form onSubmit={createTicket} className="bg-white border rounded-2xl p-4 shadow-sm space-y-4">
           <div className="text-lg font-semibold">Novo chamado</div>
@@ -265,6 +267,7 @@ export default function Tickets() {
         </form>
       )}
 
+      {/* Detalhe */}
       {detail && (
         <div className="space-y-4">
           <button className="text-slate-600 underline" onClick={() => setDetail(null)}>← Voltar</button>
@@ -275,28 +278,13 @@ export default function Tickets() {
             </div>
 
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              <div>
-                <div className="text-xs text-slate-500">Categoria</div>
-                <div className="font-medium">{detail.category}</div>
-              </div>
-              <div>
-                <div className="text-xs text-slate-500">Prioridade</div>
-                <div className="font-medium"><PriorityBadge value={detail.priority} /></div>
-              </div>
-              <div>
-                <div className="text-xs text-slate-500">Aberto em</div>
-                <div className="font-medium">{new Date(detail.created_at).toLocaleString()}</div>
-              </div>
-              <div>
-                <div className="text-xs text-slate-500">Responsável</div>
-                <div className="font-medium">{detail.assignee_id || "—"}</div>
-              </div>
+              <div><div className="text-xs text-slate-500">Categoria</div><div className="font-medium">{detail.category}</div></div>
+              <div><div className="text-xs text-slate-500">Prioridade</div><div className="font-medium"><PriorityBadge value={detail.priority} /></div></div>
+              <div><div className="text-xs text-slate-500">Aberto em</div><div className="font-medium">{new Date(detail.created_at).toLocaleString()}</div></div>
+              <div><div className="text-xs text-slate-500">Responsável</div><div className="font-medium">{detail.assignee_id || "—"}</div></div>
             </div>
 
-            <div>
-              <div className="text-xs text-slate-500">Descrição</div>
-              <div className="font-medium text-slate-700">{detail.description || "—"}</div>
-            </div>
+            <div><div className="text-xs text-slate-500">Descrição</div><div className="font-medium text-slate-700">{detail.description || "—"}</div></div>
 
             <div className="flex flex-wrap gap-2">
               {detail.status !== "em_processamento" && (
@@ -331,4 +319,3 @@ export default function Tickets() {
     </div>
   );
 }
-
