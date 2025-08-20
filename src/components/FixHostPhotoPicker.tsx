@@ -8,31 +8,30 @@ const supabase = createClient(
 
 type Props = {
   ticketId: string;
-  currentUrls?: string[];             // URLs já salvas no chamado (campo "fotos" na tabela)
-  onSaved?: (urls: string[]) => void; // callback após salvar
+  currentUrls?: string[];
+  onSaved?: (urls: string[]) => void;
+};
+
+type LocalFile = {
+  file: File;
+  previewUrl: string; // URL.createObjectURL estável até remover/enviar
 };
 
 export default function FixHostPhotoPicker({ ticketId, currentUrls = [], onSaved }: Props) {
   const MAX = 5;
-
-  // fotos novas (File) antes de enviar
-  const [files, setFiles] = useState<File[]>([]);
-  // fotos já salvas (URLs públicas)
-  const [existing, setExisting] = useState<string[]>(currentUrls || []);
+  const [pending, setPending] = useState<LocalFile[]>([]); // selecionadas (a enviar)
+  const [existing, setExisting] = useState<string[]>(currentUrls || []); // já salvas
   const [busy, setBusy] = useState(false);
 
-  // 2 inputs separados: galeria (sem capture) e câmera (com capture)
   const galleryRef = useRef<HTMLInputElement>(null);
   const cameraRef  = useRef<HTMLInputElement>(null);
 
-  // mantém sincronizado se o pai atualizar currentUrls
   useEffect(() => {
     setExisting(Array.isArray(currentUrls) ? currentUrls : []);
   }, [currentUrls]);
 
-  // ===== Utils =====
   function withSafeName(f: File) {
-    const ext = (f.type?.split("/")[1] || "jpg").replace("jpeg","jpg");
+    const ext = (f.type?.split("/")[1] || "jpg").replace("jpeg", "jpg");
     const safe = f.name && f.name.trim().length ? f.name : `${crypto.randomUUID()}.${ext}`;
     return new File([f], safe, { type: f.type || "image/jpeg", lastModified: Date.now() });
   }
@@ -42,12 +41,10 @@ export default function FixHostPhotoPicker({ ticketId, currentUrls = [], onSaved
     const scale = Math.min(1, maxSide / Math.max(bmp.width, bmp.height));
     const w = Math.round(bmp.width * scale);
     const h = Math.round(bmp.height * scale);
-
     const canvas = document.createElement("canvas");
     canvas.width = w; canvas.height = h;
     const ctx = canvas.getContext("2d")!;
     ctx.drawImage(bmp, 0, 0, w, h);
-
     const blob: Blob = await new Promise((res) =>
       canvas.toBlob((b) => res(b!), "image/jpeg", quality)
     );
@@ -55,15 +52,16 @@ export default function FixHostPhotoPicker({ ticketId, currentUrls = [], onSaved
     return new File([blob], name, { type: "image/jpeg", lastModified: Date.now() });
   }
 
-  // ===== Seleção de fotos (corrige galeria → câmera com reset do input usado) =====
   function addFiles(list: FileList | null, origem: "galeria" | "camera") {
     if (!list) return;
     const incoming = Array.from(list).map(withSafeName);
 
-    // limite considera já salvas + as ainda não enviadas
-    setFiles((prev) => {
+    setPending((prev) => {
       const room = Math.max(0, MAX - (existing.length + prev.length));
-      const take = incoming.slice(0, room);
+      const take = incoming.slice(0, room).map((f) => ({
+        file: f,
+        previewUrl: URL.createObjectURL(f),
+      }));
       return [...prev, ...take];
     });
 
@@ -71,25 +69,23 @@ export default function FixHostPhotoPicker({ ticketId, currentUrls = [], onSaved
     if (origem === "camera"  && cameraRef.current)  cameraRef.current.value  = "";
   }
 
-  function onPickGallery(e: React.ChangeEvent<HTMLInputElement>) {
-    addFiles(e.target.files, "galeria");
-  }
+  function onPickGallery(e: React.ChangeEvent<HTMLInputElement>) { addFiles(e.target.files, "galeria"); }
+  function onPickCamera(e: React.ChangeEvent<HTMLInputElement>)  { addFiles(e.target.files, "camera"); }
 
-  function onPickCamera(e: React.ChangeEvent<HTMLInputElement>) {
-    addFiles(e.target.files, "camera");
-  }
-
-  // ===== Remover antes de enviar =====
   function removeSelected(idx: number) {
-    setFiles((prev) => prev.filter((_, i) => i !== idx));
+    setPending((prev) => {
+      const clone = [...prev];
+      const item = clone[idx];
+      if (item) URL.revokeObjectURL(item.previewUrl);
+      clone.splice(idx, 1);
+      return clone;
+    });
   }
 
-  // ===== Remover já salvo (apaga do storage e da tabela) =====
   async function removeExisting(url: string) {
     if (busy) return;
     setBusy(true);
     try {
-      // tenta deletar do storage usando a URL pública
       const mark = "/object/public/";
       const i = url.indexOf(mark);
       if (i > -1) {
@@ -99,14 +95,9 @@ export default function FixHostPhotoPicker({ ticketId, currentUrls = [], onSaved
         const path = pathWithBucket.slice(slash + 1);
         await supabase.storage.from(bucket).remove([path]);
       }
-
       const newExisting = existing.filter((u) => u !== url);
-      const { error: updErr } = await supabase
-        .from("chamados")
-        .update({ fotos: newExisting })
-        .eq("id", ticketId);
+      const { error: updErr } = await supabase.from("chamados").update({ fotos: newExisting }).eq("id", ticketId);
       if (updErr) throw updErr;
-
       setExisting(newExisting);
       onSaved?.(newExisting);
       alert("Foto removida.");
@@ -118,16 +109,14 @@ export default function FixHostPhotoPicker({ ticketId, currentUrls = [], onSaved
     }
   }
 
-  // ===== Upload =====
   async function uploadAll() {
-    if (busy || files.length === 0) return;
+    if (busy || pending.length === 0) return;
     setBusy(true);
     try {
-      const compressed = await Promise.all(files.map((f) => compressImage(f)));
-
+      const compressed = await Promise.all(pending.map((p) => compressImage(p.file)));
       const bucket = "chamados-fotos";
       const tasks = compressed.map(async (file) => {
-        const ext = (file.type?.split("/")[1] || "jpg").replace("jpeg","jpg");
+        const ext = (file.type?.split("/")[1] || "jpg").replace("jpeg", "jpg");
         const path = `${ticketId}/${crypto.randomUUID()}.${ext}`;
         const { error: upErr } = await supabase.storage.from(bucket).upload(path, file, {
           contentType: file.type,
@@ -146,20 +135,17 @@ export default function FixHostPhotoPicker({ ticketId, currentUrls = [], onSaved
       if (okUrls.length === 0) throw new Error("Falha ao enviar as fotos.");
 
       const merged = [...existing, ...okUrls].slice(0, MAX);
-      const { error: updErr } = await supabase
-        .from("chamados")
-        .update({ fotos: merged })
-        .eq("id", ticketId);
+      const { error: updErr } = await supabase.from("chamados").update({ fotos: merged }).eq("id", ticketId);
       if (updErr) throw updErr;
 
+      // limpa previews antigos
+      pending.forEach((p) => URL.revokeObjectURL(p.previewUrl));
+      setPending([]);
       setExisting(merged);
       onSaved?.(merged);
 
-      // limpa seleção e inputs
-      setFiles([]);
       if (galleryRef.current) galleryRef.current.value = "";
       if (cameraRef.current) cameraRef.current.value = "";
-
       alert("Fotos enviadas com sucesso!");
     } catch (e: any) {
       console.error("[uploadAll] ERRO:", e);
@@ -201,7 +187,7 @@ export default function FixHostPhotoPicker({ ticketId, currentUrls = [], onSaved
     fontWeight: 700,
   };
 
-  const count = existing.length + files.length;
+  const count = existing.length + pending.length;
   const remaining = Math.max(0, MAX - count);
 
   return (
@@ -212,7 +198,6 @@ export default function FixHostPhotoPicker({ ticketId, currentUrls = [], onSaved
       </div>
 
       <div style={{ display: "flex", gap: 12, flexWrap: "wrap", alignItems: "center" }}>
-        {/* Botão GALERIA (sem capture) */}
         <label style={btn}>
           Adicionar da galeria
           <input
@@ -221,12 +206,11 @@ export default function FixHostPhotoPicker({ ticketId, currentUrls = [], onSaved
             accept="image/*"
             multiple
             style={{ display: "none" }}
-            onChange={onPickGallery}
+            onChange={(e) => addFiles(e.target.files, "galeria")}
             disabled={remaining === 0}
           />
         </label>
 
-        {/* Botão CÂMERA (com capture) */}
         <label style={btn}>
           Usar câmera
           <input
@@ -235,15 +219,15 @@ export default function FixHostPhotoPicker({ ticketId, currentUrls = [], onSaved
             accept="image/*"
             capture="environment"
             style={{ display: "none" }}
-            onChange={onPickCamera}
+            onChange={(e) => addFiles(e.target.files, "camera")}
             disabled={remaining === 0}
           />
         </label>
 
         <button
           onClick={uploadAll}
-          disabled={busy || files.length === 0}
-          style={{ ...btn, background: busy || files.length === 0 ? "#eee" : "#000", color: busy || files.length === 0 ? "#666" : "#fff", borderColor: "#000" }}
+          disabled={busy || pending.length === 0}
+          style={{ ...btn, background: busy || pending.length === 0 ? "#eee" : "#000", color: busy || pending.length === 0 ? "#666" : "#fff", borderColor: "#000" }}
         >
           {busy ? "Enviando..." : "Enviar fotos"}
         </button>
@@ -264,20 +248,17 @@ export default function FixHostPhotoPicker({ ticketId, currentUrls = [], onSaved
         </div>
       )}
 
-      {/* Selecionadas (antes de enviar) */}
-      {files.length > 0 && (
+      {/* Selecionadas (estáveis) */}
+      {pending.length > 0 && (
         <div style={{ marginTop: 12 }}>
           <div style={{ fontSize: 14, marginBottom: 6 }}>A enviar</div>
           <div style={wrap}>
-            {files.map((f, idx) => {
-              const url = URL.createObjectURL(f);
-              return (
-                <div key={f.name + f.lastModified} style={thumbBox}>
-                  <img src={url} alt="" style={imgCss} onLoad={() => URL.revokeObjectURL(url)} />
-                  <button title="Remover da seleção" onClick={() => removeSelected(idx)} style={delBtn}>✕</button>
-                </div>
-              );
-            })}
+            {pending.map((p, idx) => (
+              <div key={p.file.name + p.file.lastModified + idx} style={thumbBox}>
+                <img src={p.previewUrl} alt="" style={imgCss} />
+                <button title="Remover da seleção" onClick={() => removeSelected(idx)} style={delBtn}>✕</button>
+              </div>
+            ))}
           </div>
         </div>
       )}
