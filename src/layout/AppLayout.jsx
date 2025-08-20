@@ -3,9 +3,8 @@ import { supabase } from "../lib/supabase";
 
 export default function AppLayout() {
   return (
-    // Layout: 1 coluna no mobile, 2 colunas a partir de md
+    // 1 coluna no mobile; 2 colunas a partir de md
     <div className="min-h-dvh grid md:grid-cols-[260px_1fr]">
-      {/* Sidebar */}
       <aside className="bg-gray-900 text-white p-4 space-y-3 md:min-h-dvh">
         <div className="flex items-center justify-between gap-3">
           <h1 className="text-lg font-bold">🏨 FixHost</h1>
@@ -17,7 +16,6 @@ export default function AppLayout() {
           </button>
         </div>
 
-        {/* Navegação */}
         <nav className="flex md:flex-col gap-2 overflow-x-auto">
           <NavLink
             to="/app/dashboard"
@@ -29,7 +27,6 @@ export default function AppLayout() {
           >
             Dashboard
           </NavLink>
-
           <NavLink
             to="/app/chamados"
             className={({ isActive }) =>
@@ -40,7 +37,6 @@ export default function AppLayout() {
           >
             Chamados
           </NavLink>
-
           <NavLink
             to="/app/quartos"
             className={({ isActive }) =>
@@ -51,7 +47,6 @@ export default function AppLayout() {
           >
             Quartos
           </NavLink>
-
           <NavLink
             to="/app/usuarios"
             className={({ isActive }) =>
@@ -65,7 +60,6 @@ export default function AppLayout() {
         </nav>
       </aside>
 
-      {/* Conteúdo */}
       <main className="bg-gray-50 p-4 md:p-6">
         <div className="mx-auto max-w-6xl">
           <Outlet />
