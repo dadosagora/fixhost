@@ -1,10 +1,10 @@
-import { HashRouter, Routes, Route, Navigate } from "react-router-dom";
-import { useEffect, useState } from "react";
+import { HashRouter, Routes, Route, Navigate, useNavigate } from "react-router-dom";
+import { useEffect, useMemo, useState } from "react";
 import { supabase } from "./lib/supabase";
-import AppLayout from "./layout/AppLayout"; // ou "./layout/Layout" se for o seu nome
+import AppLayout from "./layout/AppLayout"; // ou "./layout/Layout"
 import Login from "./pages/Login";
 
-/* Guard para /app */
+/* ===== Guard para /app ===== */
 function Protected({ children }) {
   const [ready, setReady] = useState(false);
   const [session, setSession] = useState(null);
@@ -25,7 +25,7 @@ function Protected({ children }) {
   return children;
 }
 
-/* ---- STUBS com conteúdo ---- */
+/* ===== Dashboard: contadores reais + gráfico simples ===== */
 function Card({ label, value }) {
   return (
     <div className="bg-white border rounded p-4">
@@ -35,120 +35,37 @@ function Card({ label, value }) {
   );
 }
 
+function Bars({ data }) {
+  // data: [{label, value}]
+  const max = Math.max(1, ...data.map(d => d.value || 0));
+  return (
+    <div className="bg-white border rounded p-4">
+      <div className="mb-3 text-sm text-gray-600">Chamados por status</div>
+      <div className="grid grid-cols-3 gap-4 items-end h-40">
+        {data.map((d) => (
+          <div key={d.label} className="flex flex-col items-center gap-1">
+            <div
+              className="w-10 bg-blue-600 rounded"
+              style={{ height: `${(d.value / max) * 100}%` }}
+              title={`${d.label}: ${d.value}`}
+            />
+            <div className="text-xs text-gray-600">{d.label}</div>
+            <div className="text-xs font-medium">{d.value}</div>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 function DashboardPage() {
-  return (
-    <div className="space-y-6">
-      <h2 className="text-xl font-semibold">Dashboard</h2>
-      <div className="grid gap-4 sm:grid-cols-3">
-        <Card label="Abertos" value="12" />
-        <Card label="Em andamento" value="7" />
-        <Card label="Atrasados" value="3" />
-      </div>
-      <div className="bg-white border rounded p-4">
-        <div className="mb-2 text-sm text-gray-600">Chamados por dia (demo)</div>
-        <svg viewBox="0 0 300 100" className="w-full h-28">
-          <polyline
-            points="0,80 40,70 80,75 120,50 160,40 200,45 240,30 300,35"
-            fill="none"
-            stroke="currentColor"
-            strokeWidth="3"
-          />
-        </svg>
-      </div>
-    </div>
-  );
-}
+  const [counts, setCounts] = useState({ abertos: 0, andamento: 0, atrasados: 0 });
 
-function ChamadosPage() {
-  return (
-    <div className="space-y-4">
-      <div className="flex items-center justify-between">
-        <h2 className="text-xl font-semibold">Chamados</h2>
-        <button className="bg-blue-600 hover:bg-blue-700 text-white px-3 py-2 rounded text-sm">
-          Novo chamado
-        </button>
-      </div>
-      <div className="bg-white border rounded">
-        <table className="w-full text-sm">
-          <thead className="bg-gray-100 text-left">
-            <tr>
-              <th className="p-2">#</th>
-              <th className="p-2">Título</th>
-              <th className="p-2">Local</th>
-              <th className="p-2">Prioridade</th>
-              <th className="p-2">Status</th>
-            </tr>
-          </thead>
-          <tbody>
-            <tr className="border-t">
-              <td className="p-2">101</td>
-              <td className="p-2">Torneira pingando</td>
-              <td className="p-2">Apto 203</td>
-              <td className="p-2">média</td>
-              <td className="p-2">aberto</td>
-            </tr>
-            <tr className="border-t">
-              <td className="p-2">102</td>
-              <td className="p-2">Ar-cond. barulhento</td>
-              <td className="p-2">Apto 510</td>
-              <td className="p-2">alta</td>
-              <td className="p-2">em_andamento</td>
-            </tr>
-          </tbody>
-        </table>
-      </div>
-      <p className="text-xs text-gray-500">
-        (Demo) Em breve esta tela puxa os dados reais do Supabase.
-      </p>
-    </div>
-  );
-}
-
-function QuartosPage() {
-  return (
-    <div className="space-y-3">
-      <h2 className="text-xl font-semibold">Quartos</h2>
-      <div className="bg-white border rounded p-4 text-sm text-gray-600">
-        Em breve: cadastro de quartos, status de ocupação e histórico de manutenção.
-      </div>
-    </div>
-  );
-}
-
-function UsuariosPage() {
-  return (
-    <div className="space-y-3">
-      <h2 className="text-xl font-semibold">Usuários</h2>
-      <div className="bg-white border rounded p-4 text-sm text-gray-600">
-        Em breve: lista de usuários, papéis (gestor, técnico, recepção) e convites.
-      </div>
-    </div>
-  );
-}
-/* ---- FIM STUBS ---- */
-
-export default function App() {
-  return (
-    <HashRouter>
-      <Routes>
-        <Route path="/login" element={<Login />} />
-        <Route
-          path="/app"
-          element={
-            <Protected>
-              <AppLayout />
-            </Protected>
-          }
-        >
-          <Route index element={<DashboardPage />} />
-          <Route path="dashboard" element={<DashboardPage />} />
-          <Route path="chamados" element={<ChamadosPage />} />
-          <Route path="quartos" element={<QuartosPage />} />
-          <Route path="usuarios" element={<UsuariosPage />} />
-          <Route path="*" element={<Navigate to="dashboard" replace />} />
-        </Route>
-        <Route path="*" element={<Navigate to="/app" replace />} />
-      </Routes>
-    </HashRouter>
-  );
-}
+  useEffect(() => {
+    (async () => {
+      // Faz 3 contagens simples usando filtros de status
+      async function countStatus(status) {
+        const { count } = await supabase
+          .from("tickets")
+          .select("*", { count: "exact", head: true })
+          .eq("status", status);
