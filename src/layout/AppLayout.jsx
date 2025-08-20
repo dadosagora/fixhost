@@ -1,3 +1,4 @@
+// src/layout/AppLayout.jsx
 import { Outlet, NavLink, useNavigate } from "react-router-dom";
 import { supabase } from "../lib/supabase";
 
@@ -31,10 +32,10 @@ export default function AppLayout() {
                 <li>
                   <NavLink
                     to="/app/dashboard"
+                    end
                     className={({ isActive }) =>
                       `${linkBase} ${isActive ? linkActive : linkIdle}`
                     }
-                    end
                   >
                     Dashboard
                   </NavLink>
@@ -46,3 +47,47 @@ export default function AppLayout() {
                       `${linkBase} ${isActive ? linkActive : linkIdle}`
                     }
                   >
+                    Chamados
+                  </NavLink>
+                </li>
+                <li>
+                  <NavLink
+                    to="/app/quartos"
+                    className={({ isActive }) =>
+                      `${linkBase} ${isActive ? linkActive : linkIdle}`
+                    }
+                  >
+                    Quartos
+                  </NavLink>
+                </li>
+                <li>
+                  <NavLink
+                    to="/app/usuarios"
+                    className={({ isActive }) =>
+                      `${linkBase} ${isActive ? linkActive : linkIdle}`
+                    }
+                  >
+                    Usuários
+                  </NavLink>
+                </li>
+              </ul>
+            </nav>
+
+            {/* Sair */}
+            <button
+              onClick={logout}
+              className="shrink-0 px-3 py-1.5 rounded-md bg-slate-100 text-slate-900 text-sm font-medium hover:bg-white"
+            >
+              Sair
+            </button>
+          </div>
+        </div>
+      </header>
+
+      {/* Conteúdo */}
+      <main className="max-w-6xl mx-auto px-3 sm:px-6 py-4 sm:py-6">
+        <Outlet />
+      </main>
+    </div>
+  );
+}
