@@ -3,11 +3,12 @@ import { supabase } from "../lib/supabase";
 
 export default function AppLayout() {
   return (
+    // Layout: 1 coluna no mobile, 2 colunas a partir de md
     <div className="min-h-dvh grid md:grid-cols-[260px_1fr]">
-      {/* Sidebar (vira topo no mobile) */}
+      {/* Sidebar */}
       <aside className="bg-gray-900 text-white p-4 space-y-3 md:min-h-dvh">
         <div className="flex items-center justify-between gap-3">
-          <h1 className="text-lg font-bold">🏨 Hotel — Manutenções</h1>
+          <h1 className="text-lg font-bold">🏨 FixHost</h1>
           <button
             onClick={() => supabase.auth.signOut()}
             className="shrink-0 bg-white/10 hover:bg-white/20 rounded px-3 py-1 text-sm"
@@ -17,7 +18,7 @@ export default function AppLayout() {
         </div>
 
         {/* Navegação */}
-        <nav className="flex md:flex-col gap-2 overflow-x-auto scrollbar-none">
+        <nav className="flex md:flex-col gap-2 overflow-x-auto">
           <NavLink
             to="/app/dashboard"
             className={({ isActive }) =>
@@ -28,8 +29,9 @@ export default function AppLayout() {
           >
             Dashboard
           </NavLink>
+
           <NavLink
-            to="/app/tickets"
+            to="/app/chamados"
             className={({ isActive }) =>
               `px-3 py-2 rounded whitespace-nowrap ${
                 isActive ? "bg-gray-800" : "hover:bg-gray-800/60"
@@ -38,8 +40,9 @@ export default function AppLayout() {
           >
             Chamados
           </NavLink>
+
           <NavLink
-            to="/app/rooms"
+            to="/app/quartos"
             className={({ isActive }) =>
               `px-3 py-2 rounded whitespace-nowrap ${
                 isActive ? "bg-gray-800" : "hover:bg-gray-800/60"
@@ -48,8 +51,9 @@ export default function AppLayout() {
           >
             Quartos
           </NavLink>
+
           <NavLink
-            to="/app/users"
+            to="/app/usuarios"
             className={({ isActive }) =>
               `px-3 py-2 rounded whitespace-nowrap ${
                 isActive ? "bg-gray-800" : "hover:bg-gray-800/60"
