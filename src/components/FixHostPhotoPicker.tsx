@@ -290,17 +290,25 @@ export default function FixHostPhotoPicker({ ticketId, currentUrls = [], onSaved
         </div>
       )}
 
-      {/* ====== LOGS NA TELA ====== */}
-      <div style={{
-        background: "#000",
-        color: "#0f0",
-        fontSize: "12px",
-        padding: "6px",
-        marginTop: "10px",
-        maxHeight: "140px",
-        overflowY: "auto",
-        borderRadius: 6
-      }}>
+     {/* ====== LOGS NA TELA (FIXO NA TELA) ====== */}
+<div style={{
+  position: "fixed",
+  left: 0,
+  right: 0,
+  bottom: 0,
+  zIndex: 99999,
+  background: "#000",
+  color: "#0f0",
+  fontSize: "12px",
+  padding: "8px 10px",
+  maxHeight: "160px",
+  overflowY: "auto",
+  borderTop: "3px solid #0f0",
+}}>
+  <div style={{ fontWeight: 700, marginBottom: 4 }}>DEBUG LOGS (FixHost)</div>
+  {logs.length === 0 ? <div>(sem logs ainda)</div> : logs.map((l, i) => <div key={i}>{l}</div>)}
+</div>
+
         {logs.length === 0 ? <div>(sem logs ainda)</div> : logs.map((l, i) => <div key={i}>{l}</div>)}
       </div>
     </div>
