@@ -6,9 +6,9 @@ import PriorityBadge from "../components/PriorityBadge";
 
 const CATS = ["Elétrica","Hidráulica","Mobiliário","Climatização","Limpeza","Outros"];
 const MAX_PHOTOS = 5;
-const BUCKET_NAME = "chamados-fotos"; // <-- bucket do Supabase
+const BUCKET_NAME = "chamados-fotos"; // bucket do Supabase
 
-/** Comprime imagem no cliente (≈1280px, jpeg qualidade 0.7) */
+/** Comprime imagem no cliente (≈1280px, jpeg 0.7) */
 async function compressImage(file, maxSize = 1280, quality = 0.7) {
   const img = await new Promise((res, rej) => {
     const i = new Image();
@@ -212,7 +212,10 @@ export default function Tickets() {
                 <option value="media">Média</option>
                 <option value="alta">Alta</option>
               </select>
-              <button onClick={() => setCreating(true)} className="bg-slate-900 text-white rounded-lg px-3 py-2 shrink-0">
+              <button
+                onClick={() => setCreating(true)}
+                className="bg-slate-900 text-white rounded-lg px-3 py-2 shrink-0"
+              >
                 Novo chamado
               </button>
             </div>
@@ -223,18 +226,37 @@ export default function Tickets() {
             {filtered.map((t) => (
               <li key={t.id} className="rounded-xl border bg-white p-3 shadow-sm">
                 <div className="flex items-center justify-between gap-2">
-                  <div className="font-semibold">#{t.id} • {rooms.find((r) => r.id === t.room_id)?.code || "—"}</div>
+                  <div className="font-semibold">
+                    #{t.id} • {rooms.find((r) => r.id === t.room_id)?.code || "—"}
+                  </div>
                   <StatusBadge status={t.status} />
                 </div>
                 <div className="text-sm text-slate-600 mt-1">
                   {t.category} • <PriorityBadge value={t.priority} />
                 </div>
                 <div className="text-sm mt-1">{t.title || "—"}</div>
-                <div className="text-xs text-slate-500 mt-2">{new Date(t.created_at).toLocaleString()}</div>
+                <div className="text-xs text-slate-500 mt-2">
+                  {new Date(t.created_at).toLocaleString()}
+                </div>
                 <div className="flex gap-2 justify-end mt-3">
-                  <button className="border rounded-lg px-3 py-1.5 text-sm" onClick={() => setDetail(t)}>Visualizar</button>
-                  <button className="border rounded-lg px-3 py-1.5 text-sm" onClick={() => updateStatus(t, "em_processamento")}>Resolvendo</button>
-                  <button className="border rounded-lg px-3 py-1.5 text-sm" onClick={() => updateStatus(t, "resolvido")}>Resolvido</button>
+                  <button
+                    className="border rounded-lg px-3 py-1.5 text-sm"
+                    onClick={() => setDetail(t)}
+                  >
+                    Visualizar
+                  </button>
+                  <button
+                    className="border rounded-lg px-3 py-1.5 text-sm"
+                    onClick={() => updateStatus(t, "em_processamento")}
+                  >
+                    Resolvendo
+                  </button>
+                  <button
+                    className="border rounded-lg px-3 py-1.5 text-sm"
+                    onClick={() => updateStatus(t, "resolvido")}
+                  >
+                    Resolvido
+                  </button>
                 </div>
               </li>
             ))}
@@ -271,5 +293,287 @@ export default function Tickets() {
                       <td className="p-3">{new Date(t.created_at).toLocaleString()}</td>
                       <td className="p-3 text-right">
                         <div className="flex gap-2 justify-end">
-                          <button className="border rounded-lg px-3 py-1.5 text-sm" onClick={() => setDetail(t)}>Visualizar</button>
-                          <button className="border rounded-lg px-3 py-1.5 text-sm" on
+                          <button
+                            className="border rounded-lg px-3 py-1.5 text-sm"
+                            onClick={() => setDetail(t)}
+                          >
+                            Visualizar
+                          </button>
+                          <button
+                            className="border rounded-lg px-3 py-1.5 text-sm"
+                            onClick={() => updateStatus(t, "em_processamento")}
+                          >
+                            Resolvendo
+                          </button>
+                          <button
+                            className="border rounded-lg px-3 py-1.5 text-sm"
+                            onClick={() => updateStatus(t, "resolvido")}
+                          >
+                            Resolvido
+                          </button>
+                        </div>
+                      </td>
+                    </tr>
+                  ))}
+                  {filtered.length === 0 && (
+                    <tr>
+                      <td className="p-3 text-center" colSpan={8}>
+                        Nenhum chamado encontrado.
+                      </td>
+                    </tr>
+                  )}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </>
+      )}
+
+      {/* Formulário de criação */}
+      {creating && (
+        <form onSubmit={createTicket} className="bg-white border rounded-2xl p-4 shadow-sm space-y-4">
+          <div className="text-lg font-semibold">Novo chamado</div>
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <div className="space-y-1">
+              <label className="text-sm text-slate-600">Quarto</label>
+              <select
+                className="border rounded-lg px-3 py-2 w-full"
+                value={form.room_id}
+                onChange={(e) => setForm({ ...form, room_id: Number(e.target.value) })}
+                required
+              >
+                <option value="">Selecione...</option>
+                {rooms.map((r) => (
+                  <option key={r.id} value={r.id}>
+                    {r.code} — andar {r.floor}
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            <div className="space-y-1">
+              <label className="text-sm text-slate-600">Categoria</label>
+              <select
+                className="border rounded-lg px-3 py-2 w-full"
+                value={form.category}
+                onChange={(e) => setForm({ ...form, category: e.target.value })}
+              >
+                {CATS.map((c) => (
+                  <option key={c} value={c}>
+                    {c}
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            <div className="space-y-1">
+              <label className="text-sm text-slate-600">Prioridade</label>
+              <select
+                className="border rounded-lg px-3 py-2 w-full"
+                value={form.priority}
+                onChange={(e) => setForm({ ...form, priority: e.target.value })}
+              >
+                <option value="baixa">Baixa</option>
+                <option value="media">Média</option>
+                <option value="alta">Alta</option>
+              </select>
+            </div>
+
+            <div className="space-y-1">
+              <label className="text-sm text-slate-600">Título (opcional)</label>
+              <input
+                className="border rounded-lg px-3 py-2 w-full"
+                value={form.title}
+                onChange={(e) => setForm({ ...form, title: e.target.value })}
+                placeholder="Ex: Tomada solta"
+              />
+            </div>
+
+            <div className="md:col-span-2 space-y-1">
+              <label className="text-sm text-slate-600">Descrição</label>
+              <textarea
+                rows={4}
+                className="border rounded-lg px-3 py-2 w-full"
+                value={form.description}
+                onChange={(e) => setForm({ ...form, description: e.target.value })}
+                required
+              />
+            </div>
+
+            {/* FOTOS: dois botões (Galeria / Câmera) */}
+            <div className="md:col-span-2">
+              <label className="text-sm text-slate-600 block mb-1">Fotos (até 5)</label>
+
+              <div className="flex gap-2 mb-2">
+                <button
+                  type="button"
+                  className="border rounded-lg px-3 py-2"
+                  onClick={() => galleryCreateRef.current?.click()}
+                >
+                  Escolher da galeria
+                </button>
+                <button
+                  type="button"
+                  className="border rounded-lg px-3 py-2"
+                  onClick={() => cameraCreateRef.current?.click()}
+                >
+                  Tirar foto agora
+                </button>
+              </div>
+
+              {/* inputs escondidos */}
+              <input
+                ref={galleryCreateRef}
+                type="file"
+                accept="image/*"
+                multiple
+                className="hidden"
+                onChange={(e) => appendFiles(setNewPhotos, newPhotos, e.target.files)}
+              />
+              <input
+                ref={cameraCreateRef}
+                type="file"
+                accept="image/*"
+                capture="environment"
+                className="hidden"
+                onChange={(e) => appendFiles(setNewPhotos, newPhotos, e.target.files)}
+              />
+
+              <Thumbs files={newPhotos} />
+              <p className="text-xs text-slate-500 mt-1">
+                As imagens serão comprimidas antes do envio.
+              </p>
+            </div>
+          </div>
+
+          <div className="flex gap-2 justify-end">
+            <button
+              type="button"
+              className="border rounded-lg px-3 py-2"
+              onClick={() => { setCreating(false); setNewPhotos([]); }}
+            >
+              Cancelar
+            </button>
+            <button className="bg-slate-900 text-white rounded-lg px-3 py-2">
+              Salvar chamado
+            </button>
+          </div>
+        </form>
+      )}
+
+      {/* Detalhe */}
+      {detail && (
+        <div className="space-y-4">
+          <button className="text-slate-600 underline" onClick={() => setDetail(null)}>
+            ← Voltar
+          </button>
+          <div className="rounded-2xl border bg-white p-4 shadow-sm space-y-3">
+            <div className="flex items-center gap-3">
+              <div className="text-lg font-semibold">Chamado #{detail.id}</div>
+              <StatusBadge status={detail.status} />
+            </div>
+
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <div>
+                <div className="text-xs text-slate-500">Categoria</div>
+                <div className="font-medium">{detail.category}</div>
+              </div>
+              <div>
+                <div className="text-xs text-slate-500">Prioridade</div>
+                <div className="font-medium">
+                  <PriorityBadge value={detail.priority} />
+                </div>
+              </div>
+              <div>
+                <div className="text-xs text-slate-500">Aberto em</div>
+                <div className="font-medium">{new Date(detail.created_at).toLocaleString()}</div>
+              </div>
+              <div>
+                <div className="text-xs text-slate-500">Responsável</div>
+                <div className="font-medium">{detail.assignee_id || "—"}</div>
+              </div>
+            </div>
+
+            <div>
+              <div className="text-xs text-slate-500">Descrição</div>
+              <div className="font-medium text-slate-700">{detail.description || "—"}</div>
+            </div>
+
+            <div className="flex flex-wrap gap-2">
+              {detail.status !== "em_processamento" && (
+                <button
+                  className="border rounded-lg px-3 py-2"
+                  onClick={() => updateStatus(detail, "em_processamento")}
+                >
+                  Resolvendo
+                </button>
+              )}
+              {detail.status !== "resolvido" && (
+                <button
+                  className="bg-slate-900 text-white rounded-lg px-3 py-2"
+                  onClick={() => updateStatus(detail, "resolvido")}
+                >
+                  Resolvido
+                </button>
+              )}
+            </div>
+
+            {/* Atualização + fotos */}
+            <div className="pt-2 space-y-2">
+              <div className="text-sm font-medium text-slate-700">Adicionar atualização</div>
+              <input
+                className="border rounded-lg px-3 py-2 w-full"
+                placeholder="Comentário"
+                value={comment}
+                onChange={(e) => setComment(e.target.value)}
+              />
+
+              <div className="flex gap-2">
+                <button
+                  type="button"
+                  className="border rounded-lg px-3 py-2"
+                  onClick={() => galleryDetailRef.current?.click()}
+                >
+                  Galeria
+                </button>
+                <button
+                  type="button"
+                  className="border rounded-lg px-3 py-2"
+                  onClick={() => cameraDetailRef.current?.click()}
+                >
+                  Câmera
+                </button>
+              </div>
+
+              {/* inputs escondidos */}
+              <input
+                ref={galleryDetailRef}
+                type="file"
+                accept="image/*"
+                multiple
+                className="hidden"
+                onChange={(e) => appendFiles(setDetailPhotos, detailPhotos, e.target.files)}
+              />
+              <input
+                ref={cameraDetailRef}
+                type="file"
+                accept="image/*"
+                capture="environment"
+                className="hidden"
+                onChange={(e) => appendFiles(setDetailPhotos, detailPhotos, e.target.files)}
+              />
+
+              <Thumbs files={detailPhotos} />
+
+              <div className="flex justify-end">
+                <button className="border rounded-lg px-3 py-2" onClick={() => addUpdate(detail)}>
+                  Enviar
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+                }
