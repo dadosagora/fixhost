@@ -1,15 +1,17 @@
-// App.jsx — versão completa usando HashRouter e RoomPage
-// Se o seu layout estiver em ./layout/AppLayout.jsx, troque a linha abaixo para:
-// import AppLayout from "./layout/AppLayout";
+// App.jsx — HashRouter + RoomPage.jsx (singular)
 import AppLayout from "./layout/AppLayout.jsx";
 
 import { HashRouter, Routes, Route, Navigate } from "react-router-dom";
 import { useEffect, useState } from "react";
 import { supabase } from "./lib/supabase";
-import Login from "./pages/Login";
-import RoomPage from "./pages/RoomPage"; // ← novo componente de Quartos
 
-/** Protege rotas /app/* */
+// Páginas reais
+import Login from "./pages/Login.jsx";
+import Dashboard from "./pages/Dashboard.jsx";
+import Tickets from "./pages/Tickets.jsx";
+import Users from "./pages/Users.jsx";
+import RoomPage from "./pages/RoomPage.jsx"; // <<< singular e com .jsx
+
 function Protected({ children }) {
   const [ready, setReady] = useState(false);
   const [session, setSession] = useState(null);
@@ -30,56 +32,11 @@ function Protected({ children }) {
   return children;
 }
 
-/** ---- STUB PAGES (simples, só para garantir renderização) ---- */
-function DashboardPage() {
-  return (
-    <div className="space-y-6">
-      <h2 className="text-xl font-semibold">Dashboard</h2>
-      <div className="grid gap-4 sm:grid-cols-3">
-        <div className="bg-white border rounded p-4">
-          <div className="text-sm text-gray-500">Abertos</div>
-          <div className="text-2xl font-bold">12</div>
-        </div>
-        <div className="bg-white border rounded p-4">
-          <div className="text-sm text-gray-500">Em andamento</div>
-          <div className="text-2xl font-bold">7</div>
-        </div>
-        <div className="bg-white border rounded p-4">
-          <div className="text-sm text-gray-500">Atrasados</div>
-          <div className="text-2xl font-bold">3</div>
-        </div>
-      </div>
-    </div>
-  );
-}
-
-function ChamadosPage() {
-  return (
-    <div className="space-y-2">
-      <h2 className="text-xl font-semibold">Chamados</h2>
-      <p className="text-gray-600 text-sm">Listagem/CRUD de chamados (placeholder).</p>
-    </div>
-  );
-}
-
-function UsuariosPage() {
-  return (
-    <div className="space-y-2">
-      <h2 className="text-xl font-semibold">Usuários</h2>
-      <p className="text-gray-600 text-sm">Gestão de usuários (placeholder).</p>
-    </div>
-  );
-}
-/** ---- FIM STUBS ---- */
-
 export default function App() {
   return (
     <HashRouter>
       <Routes>
-        {/* pública */}
         <Route path="/login" element={<Login />} />
-
-        {/* protegida */}
         <Route
           path="/app"
           element={
@@ -88,20 +45,13 @@ export default function App() {
             </Protected>
           }
         >
-          {/* /app → Dashboard por padrão */}
-          <Route index element={<DashboardPage />} />
-          <Route path="dashboard" element={<DashboardPage />} />
-
-          {/* Rotas internas */}
-          <Route path="chamados" element={<ChamadosPage />} />
+          <Route index element={<Dashboard />} />
+          <Route path="dashboard" element={<Dashboard />} />
+          <Route path="chamados" element={<Tickets />} />
           <Route path="quartos" element={<RoomPage />} />
-          <Route path="usuarios" element={<UsuariosPage />} />
-
-          {/* fallback dentro de /app */}
+          <Route path="usuarios" element={<Users />} />
           <Route path="*" element={<Navigate to="dashboard" replace />} />
         </Route>
-
-        {/* fallback global */}
         <Route path="*" element={<Navigate to="/app" replace />} />
       </Routes>
     </HashRouter>
