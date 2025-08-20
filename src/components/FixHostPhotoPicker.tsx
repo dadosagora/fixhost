@@ -20,6 +20,17 @@ export default function FixHostPhotoPicker({ ticketId, currentUrls = [], onSaved
   const galleryRef = useRef<HTMLInputElement>(null);
   const cameraRef  = useRef<HTMLInputElement>(null);
 
+  // ======= LOG VISÍVEL NA TELA =======
+  const [logs, setLogs] = useState<string[]>([]);
+  function log(msg: string, data?: any) {
+    const text = data !== undefined ? `${msg} ${safeJson(data)}` : msg;
+    console.log(text);
+    setLogs(prev => [...prev, text].slice(-15));
+  }
+  function safeJson(v: any) {
+    try { return JSON.stringify(v); } catch { return String(v); }
+  }
+
   // =================== Utils ===================
   function withSafeName(f: File) {
     const ext = (f.type?.split("/")[1] || "jpg").replace("jpeg", "jpg");
@@ -47,37 +58,38 @@ export default function FixHostPhotoPicker({ ticketId, currentUrls = [], onSaved
 
   // =================== Seletor ===================
   function handlePicked(list: FileList | null, origem: "galeria" | "camera") {
-    console.log("[handlePicked] origem =", origem, "list =", list);
+    log("[handlePicked] origem =", origem);
     try {
-      if (!list) return;
+      if (!list) { log("[handlePicked] list vazia"); return; }
 
       const incomingRaw = Array.from(list).map(withSafeName);
+      log("[handlePicked] recebidos", incomingRaw.map(f => f.name));
 
       setFiles((prev) => {
         const existCount = Array.isArray(existing) ? existing.length : 0;
         const room = Math.max(0, MAX - (existCount + prev.length));
         const take = incomingRaw.slice(0, room);
         const merged = [...prev, ...take];
-        console.log("[handlePicked] prev:", prev.length, "incoming:", take.length, "merged:", merged.length);
+        log("[handlePicked] prev/incoming/merged", { prev: prev.length, incoming: take.length, merged: merged.length, existCount });
         return merged;
       });
     } finally {
       // 🔧 reset do input que foi usado — evita bug quando a ordem é galeria → câmera
-      if (origem === "galeria" && galleryRef.current) galleryRef.current.value = "";
-      if (origem === "camera"  && cameraRef.current)  cameraRef.current.value  = "";
+      if (origem === "galeria" && galleryRef.current) { galleryRef.current.value = ""; log("[handlePicked] reset input galeria"); }
+      if (origem === "camera"  && cameraRef.current)  { cameraRef.current.value  = ""; log("[handlePicked] reset input camera"); }
     }
   }
 
   // =================== Remoções ===================
   function removeSelected(idx: number) {
-    console.log("[removeSelected] idx =", idx);
+    log("[removeSelected] idx =", idx);
     setFiles((prev) => prev.filter((_, i) => i !== idx));
   }
 
   async function removeExisting(url: string) {
     if (busy) return;
     setBusy(true);
-    console.log("[removeExisting] url =", url);
+    log("[removeExisting] url =", url);
     try {
       // Extrai bucket e path a partir da URL pública
       const mark = "/object/public/";
@@ -88,7 +100,7 @@ export default function FixHostPhotoPicker({ ticketId, currentUrls = [], onSaved
         const bucket = pathWithBucket.slice(0, slash);
         const path = pathWithBucket.slice(slash + 1);
         const { error } = await supabase.storage.from(bucket).remove([path]);
-        if (error) console.error("Storage remove error:", error);
+        if (error) { log("[removeExisting] Storage remove error", error.message || error); }
       }
 
       const newExisting = existing.filter((u) => u !== url);
@@ -98,8 +110,8 @@ export default function FixHostPhotoPicker({ ticketId, currentUrls = [], onSaved
       setExisting(newExisting);
       onSaved?.(newExisting);
       alert("Foto removida.");
-    } catch (e) {
-      console.error(e);
+    } catch (e: any) {
+      log("[removeExisting] ERRO", e?.message || e);
       alert("Não foi possível remover esta foto agora.");
     } finally {
       setBusy(false);
@@ -110,10 +122,11 @@ export default function FixHostPhotoPicker({ ticketId, currentUrls = [], onSaved
   async function uploadAll() {
     if (busy || files.length === 0) return;
     setBusy(true);
-    console.log("[uploadAll] iniciando upload de", files.length, "fotos");
+    log("[uploadAll] iniciando", files.length);
     try {
       // 1) comprime
       const compressed = await Promise.all(files.map((f) => compressImage(f)));
+      log("[uploadAll] comprimidas", compressed.map(f => f.name));
 
       // 2) sobe com nomes/paths únicos
       const bucket = "chamados-fotos";
@@ -134,7 +147,7 @@ export default function FixHostPhotoPicker({ ticketId, currentUrls = [], onSaved
         .filter((r): r is PromiseFulfilledResult<string> => r.status === "fulfilled")
         .map((r) => r.value);
 
-      console.log("[uploadAll] okUrls:", okUrls);
+      log("[uploadAll] okUrls", okUrls);
 
       if (okUrls.length === 0) throw new Error("Falha ao enviar as fotos.");
 
@@ -149,10 +162,11 @@ export default function FixHostPhotoPicker({ ticketId, currentUrls = [], onSaved
       setFiles([]);
       if (galleryRef.current) galleryRef.current.value = "";
       if (cameraRef.current) cameraRef.current.value = "";
+      log("[uploadAll] concluído, merged", merged);
 
       alert("Fotos enviadas com sucesso!");
     } catch (e: any) {
-      console.error("[uploadAll] ERRO:", e);
+      log("[uploadAll] ERRO", e?.message || e);
       alert(e?.message || "Erro ao enviar fotos.");
     } finally {
       setBusy(false);
@@ -275,6 +289,20 @@ export default function FixHostPhotoPicker({ ticketId, currentUrls = [], onSaved
           </div>
         </div>
       )}
+
+      {/* ====== LOGS NA TELA ====== */}
+      <div style={{
+        background: "#000",
+        color: "#0f0",
+        fontSize: "12px",
+        padding: "6px",
+        marginTop: "10px",
+        maxHeight: "140px",
+        overflowY: "auto",
+        borderRadius: 6
+      }}>
+        {logs.length === 0 ? <div>(sem logs ainda)</div> : logs.map((l, i) => <div key={i}>{l}</div>)}
+      </div>
     </div>
   );
 }
