@@ -14,13 +14,13 @@ type Props = {
 
 type LocalFile = {
   file: File;
-  previewUrl: string; // URL.createObjectURL estável até remover/enviar
+  previewUrl: string;
 };
 
 export default function FixHostPhotoPicker({ ticketId, currentUrls = [], onSaved }: Props) {
   const MAX = 5;
-  const [pending, setPending] = useState<LocalFile[]>([]); // selecionadas (a enviar)
-  const [existing, setExisting] = useState<string[]>(currentUrls || []); // já salvas
+  const [pending, setPending] = useState<LocalFile[]>([]);
+  const [existing, setExisting] = useState<string[]>(currentUrls || []);
   const [busy, setBusy] = useState(false);
 
   const galleryRef = useRef<HTMLInputElement>(null);
@@ -30,28 +30,50 @@ export default function FixHostPhotoPicker({ ticketId, currentUrls = [], onSaved
     setExisting(Array.isArray(currentUrls) ? currentUrls : []);
   }, [currentUrls]);
 
+  // ---------- Utils ----------
   function withSafeName(f: File) {
-    const ext = (f.type?.split("/")[1] || "jpg").replace("jpeg", "jpg");
+    const ext = (f.type?.split("/")[1] || "jpg").replace("jpeg","jpg");
     const safe = f.name && f.name.trim().length ? f.name : `${crypto.randomUUID()}.${ext}`;
     return new File([f], safe, { type: f.type || "image/jpeg", lastModified: Date.now() });
   }
 
+  // Força JPEG quando possível. Se o navegador não conseguir decodificar (ex.: HEIC),
+  // fazemos fallback: devolvemos o arquivo original sem comprimir (evita o erro).
   async function compressImage(file: File, maxSide = 1600, quality = 0.8): Promise<File> {
-    const bmp = await createImageBitmap(file);
-    const scale = Math.min(1, maxSide / Math.max(bmp.width, bmp.height));
-    const w = Math.round(bmp.width * scale);
-    const h = Math.round(bmp.height * scale);
-    const canvas = document.createElement("canvas");
-    canvas.width = w; canvas.height = h;
-    const ctx = canvas.getContext("2d")!;
-    ctx.drawImage(bmp, 0, 0, w, h);
-    const blob: Blob = await new Promise((res) =>
-      canvas.toBlob((b) => res(b!), "image/jpeg", quality)
-    );
-    const name = file.name.replace(/\.(png|jpg|jpeg|webp|heic|heif)$/i, ".jpg");
-    return new File([blob], name, { type: "image/jpeg", lastModified: Date.now() });
+    // se não for um formato comum, evite tentar decodificar (ex.: HEIC/HEIF)
+    const type = (file.type || "").toLowerCase();
+    const isCommon = type.includes("jpeg") || type.includes("jpg") || type.includes("png") || type.includes("webp");
+
+    if (!isCommon) {
+      // fallback: manda o arquivo original (sem compressão) para não quebrar
+      return file;
+    }
+
+    // tenta decodificar e renderizar em canvas -> gera JPEG estável
+    try {
+      const bmp = await createImageBitmap(file);
+      const scale = Math.min(1, maxSide / Math.max(bmp.width, bmp.height));
+      const w = Math.round(bmp.width * scale);
+      const h = Math.round(bmp.height * scale);
+
+      const canvas = document.createElement("canvas");
+      canvas.width = w; canvas.height = h;
+      const ctx = canvas.getContext("2d")!;
+      ctx.drawImage(bmp, 0, 0, w, h);
+
+      const blob: Blob = await new Promise((res, rej) =>
+        canvas.toBlob((b) => (b ? res(b) : rej(new Error("toBlob falhou"))), "image/jpeg", quality)
+      );
+
+      const name = file.name.replace(/\.(png|jpg|jpeg|webp|heic|heif)$/i, ".jpg");
+      return new File([blob], name, { type: "image/jpeg", lastModified: Date.now() });
+    } catch {
+      // fallback defensivo caso createImageBitmap falhe
+      return file;
+    }
   }
 
+  // ---------- Seleção ----------
   function addFiles(list: FileList | null, origem: "galeria" | "camera") {
     if (!list) return;
     const incoming = Array.from(list).map(withSafeName);
@@ -72,6 +94,7 @@ export default function FixHostPhotoPicker({ ticketId, currentUrls = [], onSaved
   function onPickGallery(e: React.ChangeEvent<HTMLInputElement>) { addFiles(e.target.files, "galeria"); }
   function onPickCamera(e: React.ChangeEvent<HTMLInputElement>)  { addFiles(e.target.files, "camera"); }
 
+  // ---------- Remover ----------
   function removeSelected(idx: number) {
     setPending((prev) => {
       const clone = [...prev];
@@ -109,11 +132,13 @@ export default function FixHostPhotoPicker({ ticketId, currentUrls = [], onSaved
     }
   }
 
+  // ---------- Upload ----------
   async function uploadAll() {
     if (busy || pending.length === 0) return;
     setBusy(true);
     try {
       const compressed = await Promise.all(pending.map((p) => compressImage(p.file)));
+
       const bucket = "chamados-fotos";
       const tasks = compressed.map(async (file) => {
         const ext = (file.type?.split("/")[1] || "jpg").replace("jpeg", "jpg");
@@ -138,7 +163,7 @@ export default function FixHostPhotoPicker({ ticketId, currentUrls = [], onSaved
       const { error: updErr } = await supabase.from("chamados").update({ fotos: merged }).eq("id", ticketId);
       if (updErr) throw updErr;
 
-      // limpa previews antigos
+      // limpa previews locais
       pending.forEach((p) => URL.revokeObjectURL(p.previewUrl));
       setPending([]);
       setExisting(merged);
@@ -155,7 +180,7 @@ export default function FixHostPhotoPicker({ ticketId, currentUrls = [], onSaved
     }
   }
 
-  // ===== UI =====
+  // ---------- UI ----------
   const wrap: React.CSSProperties = { display: "flex", gap: 12, flexWrap: "wrap" };
   const thumbBox: React.CSSProperties = {
     position: "relative",
@@ -198,12 +223,13 @@ export default function FixHostPhotoPicker({ ticketId, currentUrls = [], onSaved
       </div>
 
       <div style={{ display: "flex", gap: 12, flexWrap: "wrap", alignItems: "center" }}>
+        {/* GALERIA — bloqueia HEIC/HEIF para evitar erro de decode */}
         <label style={btn}>
           Adicionar da galeria
           <input
             ref={galleryRef}
             type="file"
-            accept="image/*"
+            accept="image/jpeg,image/png,image/webp"
             multiple
             style={{ display: "none" }}
             onChange={(e) => addFiles(e.target.files, "galeria")}
@@ -211,12 +237,13 @@ export default function FixHostPhotoPicker({ ticketId, currentUrls = [], onSaved
           />
         </label>
 
+        {/* CÂMERA — normalmente já vem em JPEG */}
         <label style={btn}>
           Usar câmera
           <input
             ref={cameraRef}
             type="file"
-            accept="image/*"
+            accept="image/jpeg,image/png,image/webp"
             capture="environment"
             style={{ display: "none" }}
             onChange={(e) => addFiles(e.target.files, "camera")}
@@ -248,7 +275,7 @@ export default function FixHostPhotoPicker({ ticketId, currentUrls = [], onSaved
         </div>
       )}
 
-      {/* Selecionadas (estáveis) */}
+      {/* A enviar */}
       {pending.length > 0 && (
         <div style={{ marginTop: 12 }}>
           <div style={{ fontSize: 14, marginBottom: 6 }}>A enviar</div>
