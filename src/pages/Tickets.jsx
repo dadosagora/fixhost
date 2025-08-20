@@ -5,6 +5,48 @@ import StatusBadge from "../components/StatusBadge";
 import PriorityBadge from "../components/PriorityBadge";
 
 const CATS = ["Elétrica","Hidráulica","Mobiliário","Climatização","Limpeza","Outros"];
+const MAX_PHOTOS = 5;
+
+/** Comprime imagem no cliente (≈1280px, jpeg qualidade 0.7) */
+async function compressImage(file, maxSize = 1280, quality = 0.7) {
+  const img = await new Promise((res, rej) => {
+    const i = new Image();
+    i.onload = () => res(i);
+    i.onerror = rej;
+    i.src = URL.createObjectURL(file);
+  });
+
+  let { width, height } = img;
+  if (width > height && width > maxSize) { height = (maxSize / width) * height; width = maxSize; }
+  else if (height > width && height > maxSize) { width = (maxSize / height) * width; height = maxSize; }
+  else if (width === height && width > maxSize) { width = height = maxSize; }
+
+  const canvas = document.createElement("canvas");
+  canvas.width = Math.round(width);
+  canvas.height = Math.round(height);
+  const ctx = canvas.getContext("2d");
+  ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+
+  const blob = await new Promise((res) => canvas.toBlob(res, "image/jpeg", quality));
+  return new File([blob], `${Date.now()}.jpg`, { type: "image/jpeg" });
+}
+
+/** Envia fotos ao Storage e retorna URLs públicas */
+async function uploadPhotos(ticketId, files) {
+  const out = [];
+  for (const f of files.slice(0, MAX_PHOTOS)) {
+    const compressed = await compressImage(f);
+    const path = `ticket_${ticketId}/${Date.now()}_${Math.random().toString(36).slice(2)}.jpg`;
+    const { error } = await supabase.storage.from("tickets").upload(path, compressed, {
+      contentType: "image/jpeg",
+      upsert: true,
+    });
+    if (error) throw error;
+    const { data } = supabase.storage.from("tickets").getPublicUrl(path);
+    out.push(data.publicUrl);
+  }
+  return out;
+}
 
 export default function Tickets() {
   const [tickets, setTickets] = useState([]);
@@ -12,8 +54,12 @@ export default function Tickets() {
   const [filter, setFilter] = useState({ q: "", status: "todos", priority: "todas" });
   const [creating, setCreating] = useState(false);
   const [detail, setDetail] = useState(null);
+
   const [form, setForm] = useState({ room_id: "", category: CATS[0], priority: "media", title: "", description: "" });
+  const [newPhotos, setNewPhotos] = useState([]);           // fotos no form de criação
+
   const [comment, setComment] = useState("");
+  const [detailPhotos, setDetailPhotos] = useState([]);     // fotos no painel de detalhe
 
   useEffect(() => { load(); }, []);
 
@@ -34,17 +80,39 @@ export default function Tickets() {
   async function createTicket(e) {
     e.preventDefault();
     if (!form.room_id) { alert("Selecione um quarto."); return; }
+
     const dueHours = form.priority === "alta" ? 24 : form.priority === "media" ? 48 : 72;
     const { data: { user } } = await supabase.auth.getUser();
-    const { error } = await supabase.from("tickets").insert({
-      ...form,
-      created_by: user.id,
-      status: "em_aberto",
-      due_at: new Date(Date.now() + dueHours * 3600 * 1000).toISOString(),
-    });
+
+    const { data, error } = await supabase.from("tickets")
+      .insert({
+        ...form,
+        created_by: user.id,
+        status: "em_aberto",
+        due_at: new Date(Date.now() + dueHours * 3600 * 1000).toISOString(),
+      })
+      .select("id").single();
+
     if (error) { alert("Erro ao salvar: " + error.message); return; }
+
+    // envia fotos (se houver) e cria updates com photo_url
+    if (newPhotos.length) {
+      try {
+        const urls = await uploadPhotos(data.id, newPhotos);
+        for (const url of urls) {
+          await supabase.from("ticket_updates").insert({
+            ticket_id: data.id,
+            comment: "Foto anexada",
+            created_by: user.id,
+            photo_url: url,
+          });
+        }
+      } catch (err) { alert("Erro ao enviar fotos: " + err.message); }
+    }
+
     setCreating(false);
     setForm({ room_id: "", category: CATS[0], priority: "media", title: "", description: "" });
+    setNewPhotos([]);
     await load();
   }
 
@@ -53,6 +121,7 @@ export default function Tickets() {
       .update({ status: newStatus, closed_at: newStatus === "resolvido" ? new Date().toISOString() : null })
       .eq("id", ticket.id);
     if (error) { alert("Erro ao atualizar status: " + error.message); return; }
+
     await supabase.from("ticket_updates").insert({
       ticket_id: ticket.id,
       old_status: ticket.status,
@@ -65,11 +134,42 @@ export default function Tickets() {
   }
 
   async function addUpdate(ticket) {
-    if (!comment) return;
-    const { error } = await supabase.from("ticket_updates")
-      .insert({ ticket_id: ticket.id, comment, created_by: (await supabase.auth.getUser()).data.user.id });
-    if (error) { alert("Erro ao adicionar comentário: " + error.message); return; }
+    const { data: { user } } = await supabase.auth.getUser();
+
+    if (comment.trim()) {
+      const { error } = await supabase.from("ticket_updates")
+        .insert({ ticket_id: ticket.id, comment, created_by: user.id });
+      if (error) { alert("Erro ao adicionar comentário: " + error.message); return; }
+    }
+
+    if (detailPhotos.length) {
+      try {
+        const urls = await uploadPhotos(ticket.id, detailPhotos);
+        for (const url of urls) {
+          await supabase.from("ticket_updates").insert({
+            ticket_id: ticket.id,
+            comment: "Foto anexada",
+            created_by: user.id,
+            photo_url: url,
+          });
+        }
+      } catch (err) { alert("Erro ao enviar fotos: " + err.message); }
+    }
+
     setComment("");
+    setDetailPhotos([]);
+    alert("Atualização enviada ✅");
+  }
+
+  function Thumbs({ files }) {
+    if (!files?.length) return null;
+    return (
+      <div className="flex gap-2 flex-wrap mt-2">
+        {Array.from(files).slice(0, MAX_PHOTOS).map((f, i) => (
+          <img key={i} src={URL.createObjectURL(f)} alt="" className="h-16 w-16 object-cover rounded border" />
+        ))}
+      </div>
+    );
   }
 
   return (
@@ -105,10 +205,7 @@ export default function Tickets() {
                 <option value="media">Média</option>
                 <option value="alta">Alta</option>
               </select>
-              <button
-                onClick={() => setCreating(true)}
-                className="bg-slate-900 text-white rounded-lg px-3 py-2 shrink-0"
-              >
+              <button onClick={() => setCreating(true)} className="bg-slate-900 text-white rounded-lg px-3 py-2 shrink-0">
                 Novo chamado
               </button>
             </div>
@@ -119,22 +216,18 @@ export default function Tickets() {
             {filtered.map((t) => (
               <li key={t.id} className="rounded-xl border bg-white p-3 shadow-sm">
                 <div className="flex items-center justify-between gap-2">
-                  <div className="font-semibold">
-                    #{t.id} • {rooms.find((r) => r.id === t.room_id)?.code || "—"}
-                  </div>
+                  <div className="font-semibold">#{t.id} • {rooms.find((r) => r.id === t.room_id)?.code || "—"}</div>
                   <StatusBadge status={t.status} />
                 </div>
                 <div className="text-sm text-slate-600 mt-1">
                   {t.category} • <PriorityBadge value={t.priority} />
                 </div>
                 <div className="text-sm mt-1">{t.title || "—"}</div>
-                <div className="text-xs text-slate-500 mt-2">
-                  {new Date(t.created_at).toLocaleString()}
-                </div>
+                <div className="text-xs text-slate-500 mt-2">{new Date(t.created_at).toLocaleString()}</div>
                 <div className="flex gap-2 justify-end mt-3">
-                  <button className="border rounded-lg px-3 py-1.5 text-sm" onClick={() => setDetail(t)}>Ver</button>
-                  <button className="border rounded-lg px-3 py-1.5 text-sm" onClick={() => updateStatus(t, "em_processamento")}>Processar</button>
-                  <button className="border rounded-lg px-3 py-1.5 text-sm" onClick={() => updateStatus(t, "resolvido")}>Resolver</button>
+                  <button className="border rounded-lg px-3 py-1.5 text-sm" onClick={() => setDetail(t)}>Visualizar</button>
+                  <button className="border rounded-lg px-3 py-1.5 text-sm" onClick={() => updateStatus(t, "em_processamento")}>Resolvendo</button>
+                  <button className="border rounded-lg px-3 py-1.5 text-sm" onClick={() => updateStatus(t, "resolvido")}>Resolvido</button>
                 </div>
               </li>
             ))}
@@ -171,9 +264,9 @@ export default function Tickets() {
                       <td className="p-3">{new Date(t.created_at).toLocaleString()}</td>
                       <td className="p-3 text-right">
                         <div className="flex gap-2 justify-end">
-                          <button className="border rounded-lg px-3 py-1.5 text-sm" onClick={() => setDetail(t)}>Ver</button>
-                          <button className="border rounded-lg px-3 py-1.5 text-sm" onClick={() => updateStatus(t, "em_processamento")}>Processar</button>
-                          <button className="border rounded-lg px-3 py-1.5 text-sm" onClick={() => updateStatus(t, "resolvido")}>Resolver</button>
+                          <button className="border rounded-lg px-3 py-1.5 text-sm" onClick={() => setDetail(t)}>Visualizar</button>
+                          <button className="border rounded-lg px-3 py-1.5 text-sm" onClick={() => updateStatus(t, "em_processamento")}>Resolvendo</button>
+                          <button className="border rounded-lg px-3 py-1.5 text-sm" onClick={() => updateStatus(t, "resolvido")}>Resolvido</button>
                         </div>
                       </td>
                     </tr>
@@ -195,71 +288,59 @@ export default function Tickets() {
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             <div className="space-y-1">
               <label className="text-sm text-slate-600">Quarto</label>
-              <select
-                className="border rounded-lg px-3 py-2 w-full"
-                value={form.room_id}
-                onChange={(e) => setForm({ ...form, room_id: Number(e.target.value) })}
-                required
-              >
+              <select className="border rounded-lg px-3 py-2 w-full" value={form.room_id}
+                onChange={(e) => setForm({ ...form, room_id: Number(e.target.value) })} required>
                 <option value="">Selecione...</option>
-                {rooms.map((r) => (
-                  <option key={r.id} value={r.id}>
-                    {r.code} — andar {r.floor}
-                  </option>
-                ))}
+                {rooms.map((r) => (<option key={r.id} value={r.id}>{r.code} — andar {r.floor}</option>))}
               </select>
             </div>
 
             <div className="space-y-1">
               <label className="text-sm text-slate-600">Categoria</label>
-              <select
-                className="border rounded-lg px-3 py-2 w-full"
-                value={form.category}
-                onChange={(e) => setForm({ ...form, category: e.target.value })}
-              >
-                {CATS.map((c) => (
-                  <option key={c} value={c}>{c}</option>
-                ))}
+              <select className="border rounded-lg px-3 py-2 w-full" value={form.category}
+                onChange={(e) => setForm({ ...form, category: e.target.value })}>
+                {CATS.map((c) => (<option key={c} value={c}>{c}</option>))}
               </select>
             </div>
 
             <div className="space-y-1">
               <label className="text-sm text-slate-600">Prioridade</label>
-              <select
-                className="border rounded-lg px-3 py-2 w-full"
-                value={form.priority}
-                onChange={(e) => setForm({ ...form, priority: e.target.value })}
-              >
-                <option value="baixa">Baixa</option>
-                <option value="media">Média</option>
-                <option value="alta">Alta</option>
+              <select className="border rounded-lg px-3 py-2 w-full" value={form.priority}
+                onChange={(e) => setForm({ ...form, priority: e.target.value })}>
+                <option value="baixa">Baixa</option><option value="media">Média</option><option value="alta">Alta</option>
               </select>
             </div>
 
             <div className="space-y-1">
               <label className="text-sm text-slate-600">Título (opcional)</label>
-              <input
-                className="border rounded-lg px-3 py-2 w-full"
-                value={form.title}
-                onChange={(e) => setForm({ ...form, title: e.target.value })}
-                placeholder="Ex: Tomada solta"
-              />
+              <input className="border rounded-lg px-3 py-2 w-full" value={form.title}
+                onChange={(e) => setForm({ ...form, title: e.target.value })} placeholder="Ex: Tomada solta" />
             </div>
 
             <div className="md:col-span-2 space-y-1">
               <label className="text-sm text-slate-600">Descrição</label>
-              <textarea
-                rows={4}
-                className="border rounded-lg px-3 py-2 w-full"
-                value={form.description}
-                onChange={(e) => setForm({ ...form, description: e.target.value })}
-                required
+              <textarea rows={4} className="border rounded-lg px-3 py-2 w-full" value={form.description}
+                onChange={(e) => setForm({ ...form, description: e.target.value })} required />
+            </div>
+
+            {/* Fotos (até 5) */}
+            <div className="md:col-span-2">
+              <label className="text-sm text-slate-600 block mb-1">Fotos (até 5)</label>
+              <input
+                type="file"
+                accept="image/*"
+                capture="environment"
+                multiple
+                onChange={(e) => setNewPhotos(Array.from(e.target.files || []).slice(0, MAX_PHOTOS))}
+                className="block w-full border rounded-lg px-3 py-2"
               />
+              <Thumbs files={newPhotos} />
+              <p className="text-xs text-slate-500 mt-1">As imagens serão comprimidas antes do envio.</p>
             </div>
           </div>
 
           <div className="flex gap-2 justify-end">
-            <button type="button" className="border rounded-lg px-3 py-2" onClick={() => setCreating(false)}>
+            <button type="button" className="border rounded-lg px-3 py-2" onClick={() => { setCreating(false); setNewPhotos([]); }}>
               Cancelar
             </button>
             <button className="bg-slate-900 text-white rounded-lg px-3 py-2">Salvar chamado</button>
@@ -289,28 +370,39 @@ export default function Tickets() {
             <div className="flex flex-wrap gap-2">
               {detail.status !== "em_processamento" && (
                 <button className="border rounded-lg px-3 py-2" onClick={() => updateStatus(detail, "em_processamento")}>
-                  Mover para processamento
+                  Resolvendo
                 </button>
               )}
               {detail.status !== "resolvido" && (
                 <button className="bg-slate-900 text-white rounded-lg px-3 py-2" onClick={() => updateStatus(detail, "resolvido")}>
-                  Resolver chamado
+                  Resolvido
                 </button>
               )}
             </div>
 
+            {/* Atualização + fotos */}
             <div className="pt-2 space-y-2">
               <div className="text-sm font-medium text-slate-700">Adicionar atualização</div>
-              <div className="flex gap-2">
+              <input
+                className="border rounded-lg px-3 py-2 w-full"
+                placeholder="Comentário"
+                value={comment}
+                onChange={(e) => setComment(e.target.value)}
+              />
+              <div>
+                <label className="text-sm text-slate-600 block mb-1">Fotos (até 5)</label>
                 <input
-                  className="border rounded-lg px-3 py-2 w-full"
-                  placeholder="Comentário"
-                  value={comment}
-                  onChange={(e) => setComment(e.target.value)}
+                  type="file"
+                  accept="image/*"
+                  capture="environment"
+                  multiple
+                  onChange={(e) => setDetailPhotos(Array.from(e.target.files || []).slice(0, MAX_PHOTOS))}
+                  className="block w-full border rounded-lg px-3 py-2"
                 />
-                <button className="border rounded-lg px-3 py-2" onClick={() => addUpdate(detail)}>
-                  Enviar
-                </button>
+                <Thumbs files={detailPhotos} />
+              </div>
+              <div className="flex justify-end">
+                <button className="border rounded-lg px-3 py-2" onClick={() => addUpdate(detail)}>Enviar</button>
               </div>
             </div>
           </div>
