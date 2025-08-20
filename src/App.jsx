@@ -1,14 +1,13 @@
-import FixHostPhotoPicker from "./components/FixHostPhotoPicker";
+import React from "react";
+import FixHostPhotoPicker from "./FixHostPhotoPicker";
 
 export default function App() {
   return (
-    <div style={{ padding: 16 }}>
-      <h1 style={{ marginBottom: 12 }}>TESTE: FixHostPhotoPicker montado?</h1>
-
+    <div className="p-4">
+      <h1 className="text-xl font-bold mb-4">Teste de Upload de Fotos</h1>
       <FixHostPhotoPicker
-        ticketId="TESTE_TICKET_ID"
-        currentUrls={[]}
-        onSaved={(urls) => console.log("onSaved (teste):", urls)}
+        ticketId="b154723a-8304-414d-af91-63c53d4415da"
+        tableName="chamados"
       />
     </div>
   );
