@@ -1,36 +1,62 @@
-import React,{useEffect,useState} from 'react'
-import Layout from '../layout/Layout'
-import StatCard from '../components/StatCard'
-import { supabase } from '../lib/supabase'
-import { ResponsiveContainer,AreaChart,Area,XAxis,YAxis,Tooltip } from 'recharts'
-export default function Dashboard(){
-  const [stats,setStats]=useState({open:0,inprog:0,done30:0,sens:0})
-  const [chartData,setChartData]=useState([])
-  useEffect(()=>{(async()=>{
-    const { data:tickets } = await supabase.from('tickets').select('*')
-    const open=tickets?.filter(t=>t.status==='em_aberto').length||0
-    const inprog=tickets?.filter(t=>t.status==='em_processamento').length||0
-    const done30=tickets?.filter(t=>t.status==='resolvido').length||0
-    const sens=tickets?.filter(t=>t.status!=='resolvido'&&(t.priority==='alta'||t.priority==='media')).length||0
-    setStats({open,inprog,done30,sens})
-    setChartData([{dia:'Hoje',abertos:open,resolvidos:done30}])
-  })()},[])
-  return (<Layout>
-    <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
-      <StatCard title="Em aberto" value={stats.open} hint="Chamados aguardando início"/>
-      <StatCard title="Em processamento" value={stats.inprog} hint="Intervenções em curso"/>
-      <StatCard title="Resolvidos (30d)" value={stats.done30} hint="Conclusões recentes"/>
-      <StatCard title="SLAs sensíveis" value={stats.sens} hint="Prioridade média/alta"/>
-    </div>
-    <div className="rounded-2xl border bg-white p-4 shadow-sm mt-6">
-      <div className="text-lg font-semibold mb-2">Volume de chamados (exemplo)</div>
-      <div className="h-64">
-        <ResponsiveContainer width="100%" height="100%">
-          <AreaChart data={chartData}><XAxis dataKey="dia"/><YAxis/><Tooltip/>
-            <Area type="monotone" dataKey="abertos" fillOpacity={0.2} strokeWidth={2}/>
-            <Area type="monotone" dataKey="resolvidos" fillOpacity={0.2} strokeWidth={2}/>
-          </AreaChart>
-        </ResponsiveContainer>
+import React, { useEffect, useState } from "react";
+import StatCard from "../components/StatCard";
+import { supabase } from "../lib/supabase";
+
+export default function Dashboard() {
+  const [stats, setStats] = useState({ open: 0, inprog: 0, pending: 0 });
+
+  useEffect(() => {
+    (async () => {
+      // Busca simples; ajuste se quiser filtrar por data etc.
+      const { data: tickets, error } = await supabase
+        .from("tickets")
+        .select("*");
+
+      if (error) {
+        console.error(error);
+        return;
+      }
+
+      // Status válidos no seu schema:
+      // 'aberto','triagem','em_andamento','pendente','resolvido','fechado'
+      const open = tickets?.filter((t) => t.status === "aberto").length || 0;
+      const inprog =
+        tickets?.filter((t) => t.status === "em_andamento").length || 0;
+      const pending =
+        tickets?.filter((t) => t.status === "pendente").length || 0;
+
+      setStats({ open, inprog, pending });
+    })();
+  }, []);
+
+  return (
+    <div className="space-y-6">
+      <h2 className="text-xl font-semibold">Dashboard</h2>
+
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+        <StatCard title="Abertos" value={stats.open} hint="Chamados aguardando início" />
+        <StatCard title="Em andamento" value={stats.inprog} hint="Intervenções em curso" />
+        <StatCard title="Pendentes" value={stats.pending} hint="Aguardando ação/peças" />
       </div>
-    </div></Layout>)
+
+      {/* gráfico bem simples em SVG para não depender de lib extra */}
+      <div className="rounded-2xl border bg-white p-4 shadow-sm">
+        <div className="text-lg font-semibold mb-2">Chamados por status (exemplo)</div>
+        <div className="h-40">
+          <svg viewBox="0 0 320 120" className="w-full h-full">
+            {/* Eixo */}
+            <line x1="20" y1="100" x2="300" y2="100" stroke="currentColor" strokeWidth="1" />
+            {/* Barras simples */}
+            <rect x="40" y={100 - stats.open * 6} width="40" height={stats.open * 6} rx="4" />
+            <rect x="140" y={100 - stats.inprog * 6} width="40" height={stats.inprog * 6} rx="4" />
+            <rect x="240" y={100 - stats.pending * 6} width="40" height={stats.pending * 6} rx="4" />
+            {/* Labels */}
+            <text x="60" y="112" textAnchor="middle" fontSize="12">Abertos</text>
+            <text x="160" y="112" textAnchor="middle" fontSize="12">Em andamento</text>
+            <text x="260" y="112" textAnchor="middle" fontSize="12">Pendentes</text>
+          </svg>
+        </div>
+      </div>
+    </div>
+  );
 }
