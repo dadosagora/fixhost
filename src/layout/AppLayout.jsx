@@ -1,74 +1,48 @@
-import { NavLink, Outlet } from "react-router-dom";
+import { Outlet, NavLink, useNavigate } from "react-router-dom";
 import { supabase } from "../lib/supabase";
 
 export default function AppLayout() {
+  const navigate = useNavigate();
+
+  async function logout() {
+    await supabase.auth.signOut();
+    navigate("/login");
+  }
+
+  const linkBase =
+    "px-3 py-2 rounded-md text-sm font-medium transition-colors";
+  const linkActive = "bg-slate-700 text-white";
+  const linkIdle = "text-slate-200 hover:bg-slate-700/60";
+
   return (
-    // 1 coluna no mobile; 2 colunas a partir de md
-    <div className="min-h-dvh grid md:grid-cols-[260px_1fr]">
-      {/* Barra azul (sidebar no desktop / topo no mobile) */}
-      <aside className="bg-gray-900 text-white">
-        {/* header compacto, mesma altura sempre */}
-        <div className="px-4 py-3 flex items-center justify-between gap-3">
-          <h1 className="text-lg font-bold">🏨 FixHost</h1>
-          <button
-            onClick={() => supabase.auth.signOut()}
-            className="shrink-0 bg-white/10 hover:bg-white/20 rounded px-3 py-1 text-sm"
-          >
-            Sair
-          </button>
-        </div>
+    <div className="min-h-screen bg-slate-100">
+      {/* Header */}
+      <header className="sticky top-0 z-40 bg-slate-900 text-white">
+        <div className="max-w-6xl mx-auto px-3 sm:px-6">
+          <div className="h-14 flex items-center justify-between gap-2">
+            {/* Logo */}
+            <div className="flex items-center gap-2 min-w-0">
+              <span className="text-lg sm:text-xl font-bold truncate">🏨 FixHost</span>
+            </div>
 
-        {/* nav horizontal no mobile, coluna no desktop */}
-        <nav className="px-4 pb-3 md:pb-4 flex md:flex-col gap-2 overflow-x-auto">
-          <NavLink
-            to="/app/dashboard"
-            className={({ isActive }) =>
-              `px-3 py-2 rounded whitespace-nowrap ${
-                isActive ? "bg-gray-800" : "hover:bg-gray-800/60"
-              }`
-            }
-          >
-            Dashboard
-          </NavLink>
-          <NavLink
-            to="/app/chamados"
-            className={({ isActive }) =>
-              `px-3 py-2 rounded whitespace-nowrap ${
-                isActive ? "bg-gray-800" : "hover:bg-gray-800/60"
-              }`
-            }
-          >
-            Chamados
-          </NavLink>
-          <NavLink
-            to="/app/quartos"
-            className={({ isActive }) =>
-              `px-3 py-2 rounded whitespace-nowrap ${
-                isActive ? "bg-gray-800" : "hover:bg-gray-800/60"
-              }`
-            }
-          >
-            Quartos
-          </NavLink>
-          <NavLink
-            to="/app/usuarios"
-            className={({ isActive }) =>
-              `px-3 py-2 rounded whitespace-nowrap ${
-                isActive ? "bg-gray-800" : "hover:bg-gray-800/60"
-              }`
-            }
-          >
-            Usuários
-          </NavLink>
-        </nav>
-      </aside>
-
-      {/* Conteúdo sempre com o mesmo topo */}
-      <main className="bg-gray-50">
-        <div className="mx-auto max-w-6xl p-4 md:p-6">
-          <Outlet />
-        </div>
-      </main>
-    </div>
-  );
-}
+            {/* Nav (rolável no mobile) */}
+            <nav className="flex-1 mx-2 overflow-x-auto">
+              <ul className="flex items-center gap-1 sm:gap-2 w-max">
+                <li>
+                  <NavLink
+                    to="/app/dashboard"
+                    className={({ isActive }) =>
+                      `${linkBase} ${isActive ? linkActive : linkIdle}`
+                    }
+                    end
+                  >
+                    Dashboard
+                  </NavLink>
+                </li>
+                <li>
+                  <NavLink
+                    to="/app/chamados"
+                    className={({ isActive }) =>
+                      `${linkBase} ${isActive ? linkActive : linkIdle}`
+                    }
+                  >
