@@ -7,22 +7,19 @@ const supabase = createClient(
 );
 
 type Props = {
-  ticketId: string;
-  currentUrls?: string[];
+  ticketId: string;           // UUID do chamado (ex.: b154723a-...)
+  currentUrls?: string[];     // URLs já salvas no chamado
   onSaved?: (urls: string[]) => void;
 };
 
 type LocalFile = {
   file: File;
-  previewUrl: string; // URL estável até remover/enviar
+  previewUrl: string;         // URL estável até remover/enviar
 };
 
 const MAX = 5;
 const BUCKET = "chamados-fotos";
-
-function isUuid(v: string) {
-  return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(v);
-}
+const TABLE_NAME = "chamados";
 
 /** Util: lê um File como dataURL */
 function readAsDataURL(file: File): Promise<string> {
@@ -151,6 +148,7 @@ export default function FixHostPhotoPicker({ ticketId, currentUrls = [], onSaved
     if (busy) return;
     setBusy(true);
     try {
+      // remove do Storage
       const mark = "/object/public/";
       const i = url.indexOf(mark);
       if (i > -1) {
@@ -161,13 +159,13 @@ export default function FixHostPhotoPicker({ ticketId, currentUrls = [], onSaved
         await supabase.storage.from(bucket).remove([path]);
       }
 
+      // atualiza tabela
       const newExisting = existing.filter((u) => u !== url);
-
-      // Só tenta atualizar a tabela se o ticketId for UUID
-      if (isUuid(ticketId)) {
-        const { error: updErr } = await supabase.from("chamados").update({ fotos: newExisting }).eq("id", ticketId);
-        if (updErr) throw updErr;
-      }
+      const { error: updErr } = await supabase
+        .from(TABLE_NAME)
+        .update({ fotos: newExisting })
+        .eq("id", ticketId);
+      if (updErr) throw updErr;
 
       setExisting(newExisting);
       onSaved?.(newExisting);
@@ -187,8 +185,8 @@ export default function FixHostPhotoPicker({ ticketId, currentUrls = [], onSaved
     try {
       const prepared = await Promise.all(pending.map((p) => compressSafeToJpeg(p.file)));
 
-      // Path base: UUID real → <ticketId>/..., teste → debug/<ticketId>/...
-      const basePath = isUuid(ticketId) ? ticketId : `debug/${encodeURIComponent(ticketId)}`;
+      // pasta do chamado = ticketId
+      const basePath = ticketId;
 
       const tasks = prepared.map(async (file) => {
         const type = file.type || "image/jpeg";
@@ -214,16 +212,14 @@ export default function FixHostPhotoPicker({ ticketId, currentUrls = [], onSaved
 
       const merged = [...existing, ...okUrls].slice(0, MAX);
 
-      // Atualiza a tabela somente quando o ID é UUID
-      if (isUuid(ticketId)) {
-        const { error: updErr } = await supabase.from("chamados").update({ fotos: merged }).eq("id", ticketId);
-        if (updErr) throw updErr;
-      } else {
-        // modo teste: apenas informa
-        console.info("[TESTE] ticketId não é UUID; URLs salvas só no Storage:", okUrls);
-      }
+      // grava na tabela SEM modo de teste
+      const { error: updErr } = await supabase
+        .from(TABLE_NAME)
+        .update({ fotos: merged })
+        .eq("id", ticketId);
+      if (updErr) throw updErr;
 
-      // limpa previews
+      // limpa previews e estado
       pending.forEach((p) => URL.revokeObjectURL(p.previewUrl));
       setPending([]);
       setExisting(merged);
@@ -231,7 +227,7 @@ export default function FixHostPhotoPicker({ ticketId, currentUrls = [], onSaved
 
       if (galleryRef.current) galleryRef.current.value = "";
       if (cameraRef.current) cameraRef.current.value = "";
-      alert(isUuid(ticketId) ? "Fotos enviadas com sucesso!" : "Fotos enviadas (modo teste: não salvou na tabela).");
+      alert("Fotos enviadas e salvas com sucesso!");
     } catch (e: any) {
       console.error("[uploadAll] ERRO:", e);
       alert(e?.message || "Erro ao enviar fotos.");
@@ -288,7 +284,7 @@ export default function FixHostPhotoPicker({ ticketId, currentUrls = [], onSaved
           <input
             ref={galleryRef}
             type="file"
-            accept="image/jpeg,image/png,image/webp" // evita HEIC/HEIF
+            accept="image/jpeg,image/png,image/webp" // evitando HEIC/HEIF
             multiple
             style={{ display: "none" }}
             onChange={onPickGallery}
