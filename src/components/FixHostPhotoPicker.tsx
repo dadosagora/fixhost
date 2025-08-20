@@ -9,8 +9,8 @@ const supabase = createClient(
 
 /**
  * Componente para selecionar, visualizar, remover e enviar até 5 fotos para um chamado.
- * Corrige o problema de upload misto (galeria + câmera) usando merge funcional de estado
- * e nomes únicos por arquivo.
+ * Corrige o problema de upload misto (galeria + câmera) usando merge funcional de estado,
+ * reset do input após cada seleção e nomes únicos por arquivo.
  */
 export default function FixHostPhotoPicker({
   ticketId,
@@ -51,16 +51,35 @@ export default function FixHostPhotoPicker({
     const ctx = canvas.getContext("2d")!;
     ctx.drawImage(bmp, 0, 0, w, h);
 
-    const blob: Blob = await new Promise((res) => canvas.toBlob((b) => res(b!), "image/jpeg", quality));
+    const blob: Blob = await new Promise((res) =>
+      canvas.toBlob((b) => res(b!), "image/jpeg", quality)
+    );
     const name = file.name.replace(/\.(png|jpg|jpeg|webp|heic|heif)$/i, ".jpg");
     return new File([blob], name, { type: "image/jpeg", lastModified: Date.now() });
   }
 
-  function handlePicked(list: FileList | null) {
-    if (!list || remaining === 0) return;
-    const incoming = Array.from(list).map(withSafeName).slice(0, remaining);
+  // 🔧 Importante: passamos a origem ("galeria" | "camera") para resetar o input usado
+  function handlePicked(list: FileList | null, origem: "galeria" | "camera") {
+    if (!list || remaining === 0) {
+      // mesmo que não use, zera o input para evitar bug de re-seleção
+      if (origem === "galeria" && galleryRef.current) galleryRef.current.value = "";
+      if (origem === "camera" && cameraRef.current) cameraRef.current.value = "";
+      return;
+    }
+
+    const incoming = Array.from(list).map(withSafeName);
+
     // MERGE FUNCIONAL → não sobrescreve seleção anterior (resolve upload misto)
-    setFiles((prev) => [...prev, ...incoming]);
+    setFiles((prev) => {
+      const existCount = Array.isArray(existing) ? existing.length : 0;
+      const room = Math.max(0, MAX - (existCount + prev.length));
+      const take = incoming.slice(0, room);
+      return [...prev, ...take];
+    });
+
+    // 🔄 reset do input que foi usado — evita bug quando a ordem é galeria → câmera
+    if (origem === "galeria" && galleryRef.current) galleryRef.current.value = "";
+    if (origem === "camera" && cameraRef.current) cameraRef.current.value = "";
   }
 
   function removeSelected(idx: number) {
@@ -72,7 +91,7 @@ export default function FixHostPhotoPicker({
     setBusy(true);
     try {
       // tenta extrair o caminho do arquivo a partir da URL pública (formato Supabase)
-      // URL tipicamente termina com /object/public/<bucket>/<path>
+      // URL tipicamente contém /object/public/<bucket>/<path>
       const parts = url.split("/object/public/");
       if (parts.length === 2) {
         const pathWithBucket = parts[1];
@@ -155,7 +174,7 @@ export default function FixHostPhotoPicker({
             accept="image/*"
             multiple
             className="hidden"
-            onChange={(e) => handlePicked(e.target.files)}
+            onChange={(e) => handlePicked(e.target.files, "galeria")}
             disabled={remaining === 0}
           />
         </label>
@@ -168,7 +187,7 @@ export default function FixHostPhotoPicker({
             accept="image/*"
             capture="environment"
             className="hidden"
-            onChange={(e) => handlePicked(e.target.files)}
+            onChange={(e) => handlePicked(e.target.files, "camera")}
             disabled={remaining === 0}
           />
         </label>
@@ -195,7 +214,6 @@ export default function FixHostPhotoPicker({
                   onClick={() => removeExisting(u)}
                   className="absolute -top-2 -right-2 w-7 h-7 rounded-full bg-white border shadow flex items-center justify-center"
                 >
-                  {/* X / lixeira simples sem libs externas */}
                   <span className="text-xs">🗑️</span>
                 </button>
               </div>
