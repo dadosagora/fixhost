@@ -1,72 +1,35 @@
-// App.jsx — versão final com HashRouter e uso de RoomPage.jsx (singular)
+import RoleGate from "../components/RoleGate";
 
-// Se você renomeou o layout para AppLayout.jsx, troque a linha abaixo:
-import AppLayout from "./layout/Layout";
-
-import { HashRouter, Routes, Route, Navigate } from "react-router-dom";
-import { useEffect, useState } from "react";
-import { supabase } from "./lib/supabase";
-
-// Páginas reais do seu projeto
-import Login from "./pages/Login";
-import Dashboard from "./pages/Dashboard";
-import Tickets from "./pages/Tickets";
-import Users from "./pages/Users";
-import RoomPage from "./pages/RoomPage"; // 👈 arquivo que você tem (singular)
-
-/** Guard de rotas protegidas (/app/*) */
-function Protected({ children }) {
-  const [ready, setReady] = useState(false);
-  const [session, setSession] = useState(null);
-
-  useEffect(() => {
-    supabase.auth.getSession().then(({ data }) => {
-      setSession(data.session);
-      setReady(true);
-    });
-    const { data: sub } = supabase.auth.onAuthStateChange((_e, s) => {
-      setSession(s);
-    });
-    return () => sub.subscription.unsubscribe();
-  }, []);
-
-  if (!ready) return <div className="p-6">Carregando…</div>;
-  if (!session) return <Navigate to="/login" replace />;
-  return children;
-}
-
-export default function App() {
+export default function RoomPage() {
   return (
-    <HashRouter>
-      <Routes>
-        {/* Pública */}
-        <Route path="/login" element={<Login />} />
+    <div className="space-y-4">
+      <div className="flex items-center justify-between">
+        <h2 className="text-xl font-semibold">Quartos</h2>
+        <RoleGate allow={["gestor"]}>
+          <button className="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded">
+            Novo quarto
+          </button>
+        </RoleGate>
+      </div>
 
-        {/* Protegida */}
-        <Route
-          path="/app"
-          element={
-            <Protected>
-              <AppLayout />
-            </Protected>
-          }
-        >
-          {/* /app → Dashboard por padrão */}
-          <Route index element={<Dashboard />} />
-          <Route path="dashboard" element={<Dashboard />} />
-
-          {/* Suas páginas */}
-          <Route path="chamados" element={<Tickets />} />
-          <Route path="quartos" element={<RoomPage />} /> {/* 👈 aqui usa RoomPage */}
-          <Route path="usuarios" element={<Users />} />
-
-          {/* Fallback dentro de /app */}
-          <Route path="*" element={<Navigate to="dashboard" replace />} />
-        </Route>
-
-        {/* Fallback global */}
-        <Route path="*" element={<Navigate to="/app" replace />} />
-      </Routes>
-    </HashRouter>
+      <div className="bg-white border rounded">
+        <table className="w-full text-sm">
+          <thead className="bg-gray-100 text-left">
+            <tr>
+              <th className="p-2">#</th>
+              <th className="p-2">Número</th>
+              <th className="p-2">Tipo</th>
+              <th className="p-2">Status</th>
+              <th className="p-2">Notas</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td className="p-2" colSpan={5}>Nenhum quarto cadastrado.</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
   );
 }
