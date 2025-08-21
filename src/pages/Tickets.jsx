@@ -12,6 +12,15 @@ const STATUS = {
   DONE: "resolvido",
 };
 
+// Helper: "há X dias" (0 => "hoje")
+function daysSinceLabel(dateStr) {
+  const d = new Date(dateStr);
+  if (Number.isNaN(d.getTime())) return "—";
+  const ms = Date.now() - d.getTime();
+  const days = Math.max(0, Math.floor(ms / 86400000));
+  return days === 0 ? "hoje" : `${days} dia${days > 1 ? "s" : ""}`;
+}
+
 export default function Tickets() {
   const { id } = useParams();
   const location = useLocation();
@@ -94,6 +103,7 @@ function TicketList() {
                   )}
                   <div className="text-xs text-slate-500 mt-1">
                     Criado em {new Date(t.created_at).toLocaleString()}
+                    {t.status !== STATUS.DONE && <> · Aberto há {daysSinceLabel(t.created_at)}</>}
                   </div>
                 </div>
                 <Link
@@ -222,16 +232,16 @@ function TicketNew({ onSaved }) {
       // 3) upload das fotos (se houver)
       const photoUrls = await uploadPhotosIfAny(photos);
 
-      // 4) monta payload com created_by (uuid do usuário)
+      // 4) monta payload com created_by
       const payload = {
         title: title.trim(),
         description: description.trim(),
         priority,
         status: STATUS.OPEN,
-        room_id: roomId,                         // bigint
+        room_id: roomId, // bigint
         category: (category ?? "").trim() || "Geral",
         photos: photoUrls.length ? photoUrls : null, // jsonb
-        created_by: user.id,                     // ✅ preenche NOT NULL
+        created_by: user.id, // uuid
       };
 
       // 5) insere
