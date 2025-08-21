@@ -4,8 +4,6 @@ import { Link, useLocation, useNavigate, useParams } from "react-router-dom";
 import { supabase } from "../lib/supabase";
 import StatusBadge from "../components/StatusBadge";
 import PriorityBadge from "../components/PriorityBadge";
-
-// ✅ Reaproveita seu componente de fotos (o mesmo usado na tela de testes)
 import FixHostPhotoPicker from "../components/FixHostPhotoPicker";
 
 const STATUS = {
@@ -42,11 +40,11 @@ function TicketList() {
         .from("tickets")
         .select("id, title, description, status, priority, room_id, created_at")
         .order("created_at", { ascending: false });
-      if (error) console.error(error);
       if (mounted) {
         setTickets(Array.isArray(data) ? data : []);
         setLoading(false);
       }
+      if (error) console.error(error);
     }
     fetchAll();
 
@@ -123,10 +121,9 @@ function TicketNew({ onSaved }) {
   const [priority, setPriority] = useState("media"); // baixa | media | alta
   const [category, setCategory] = useState("");
   const [selectedFloor, setSelectedFloor] = useState(""); // etapa 1
-  const [selectedRoomId, setSelectedRoomId] = useState(null); // etapa 2
+  const [selectedRoomId, setSelectedRoomId] = useState(null); // etapa 2 (bigint)
 
-  // ✅ fotos selecionadas pelo FixHostPhotoPicker (File | Blob | base64)
-  const [photos, setPhotos] = useState([]); // array de File/Blob/Base64
+  const [photos, setPhotos] = useState([]);
   const [saving, setSaving] = useState(false);
   const [errorMsg, setErrorMsg] = useState("");
 
@@ -149,13 +146,11 @@ function TicketNew({ onSaved }) {
     return () => { mounted = false; };
   }, []);
 
-  // lista única de andares/locais (etapa 1)
   const floorOptions = useMemo(() => {
     const vals = rooms.map((r) => (r.floor || "").trim()).filter(Boolean);
     return Array.from(new Set(vals)).sort((a, b) => a.localeCompare(b));
   }, [rooms]);
 
-  // lista de códigos filtrados pelo andar/setor escolhido (etapa 2)
   const roomOptions = useMemo(() => {
     if (!selectedFloor) return [];
     return rooms.filter((r) => (r.floor || "").trim() === selectedFloor);
@@ -163,23 +158,19 @@ function TicketNew({ onSaved }) {
 
   function onChangeFloor(value) {
     setSelectedFloor(value);
-    setSelectedRoomId(null); // limpa a segunda etapa
+    setSelectedRoomId(null);
   }
 
-  // === Upload das fotos para Supabase Storage (bucket: 'tickets') ===
   async function uploadPhotosIfAny(filesOrBlobs) {
     if (!filesOrBlobs || filesOrBlobs.length === 0) return [];
-
     const uploadedUrls = [];
     for (let i = 0; i < filesOrBlobs.length && i < 5; i++) {
       const file = filesOrBlobs[i];
-      // Gera um nome único e uma “pasta” por data
-      const ext = typeof file.name === "string" && file.name.includes(".")
+      const ext = typeof file?.name === "string" && file.name.includes(".")
         ? file.name.split(".").pop()
         : "jpg";
       const path = `tickets/${new Date().toISOString().slice(0,10)}/${crypto.randomUUID()}.${ext}`;
 
-      // Se veio base64, converte para Blob
       let toUpload = file;
       if (!(file instanceof Blob) && typeof file === "string" && file.startsWith("data:")) {
         const res = await fetch(file);
@@ -202,29 +193,36 @@ function TicketNew({ onSaved }) {
     e.preventDefault();
     setErrorMsg("");
 
-    if (!title.trim() || !selectedRoomId) {
-      setErrorMsg("Preencha Título e Local.");
+    if (!title.trim()) {
+      setErrorMsg("Informe o título.");
+      return;
+    }
+    if (!selectedRoomId) {
+      setErrorMsg("Selecione o local (andar/setor e número/identificação).");
       return;
     }
 
     try {
       setSaving(true);
 
-      // 1) sobe as fotos (se houver) e obtém URLs públicas
+      // garante bigint válido
+      const roomId = Number(selectedRoomId);
+      if (!Number.isFinite(roomId)) {
+        throw new Error("ID do local inválido.");
+      }
+
       const photoUrls = await uploadPhotosIfAny(photos);
 
-      // 2) monta o payload conforme seu schema
       const payload = {
         title: title.trim(),
         description: description.trim(),
         priority,
-        status: STATUS.OPEN, // novo = em_aberto
-        room_id: selectedRoomId,
+        status: STATUS.OPEN,
+        room_id: roomId,              // << bigint
         category: category.trim() || null,
-        photos: photoUrls.length ? photoUrls : null, // ⚠️ requer coluna JSONB "photos" na tabela tickets
+        photos: photoUrls.length ? photoUrls : null, // requer coluna jsonb 'photos'
       };
 
-      // 3) insere
       const { data, error } = await supabase
         .from("tickets")
         .insert(payload)
@@ -232,11 +230,9 @@ function TicketNew({ onSaved }) {
         .single();
 
       if (error) throw error;
-
       onSaved?.(data.id);
     } catch (err) {
       console.error("Erro ao criar chamado:", err);
-      // Mostra a mensagem real para facilitar o diagnóstico
       setErrorMsg(err?.message || "Não foi possível salvar o chamado.");
     } finally {
       setSaving(false);
@@ -301,7 +297,7 @@ function TicketNew({ onSaved }) {
               Número / Identificação
             </label>
             <select
-              value={selectedRoomId || ""}
+              value={selectedRoomId ?? ""}
               onChange={(e) => setSelectedRoomId(e.target.value ? Number(e.target.value) : null)}
               className="w-full rounded-lg border px-3 py-2 text-sm bg-white focus:ring-2 focus:ring-slate-900/10"
               required
@@ -309,7 +305,7 @@ function TicketNew({ onSaved }) {
             >
               <option value="">{selectedFloor ? "Selecione" : "Escolha um Andar/Setor primeiro"}</option>
               {roomOptions.map((r) => (
-                <option key={r.id} value={r.id}>
+                <option key={r.id} value={String(r.id)}>
                   {r.code}
                 </option>
               ))}
@@ -354,7 +350,7 @@ function TicketNew({ onSaved }) {
             />
           </div>
 
-          {/* FOTOS (até 5) */}
+          {/* Fotos */}
           <div className="sm:col-span-2">
             <label className="block text-sm font-medium text-slate-700 mb-2">
               Fotos (até 5) — câmera ou galeria
@@ -363,7 +359,6 @@ function TicketNew({ onSaved }) {
               maxPhotos={5}
               value={photos}
               onChange={setPhotos}
-              // se o componente aceitar compressão, pode passar props aqui
             />
           </div>
 
@@ -473,7 +468,6 @@ function TicketView({ id }) {
           {ticket.description || "Sem descrição."}
         </div>
 
-        {/* Mostra fotos se existirem (urls no campo JSON "photos") */}
         {Array.isArray(ticket.photos) && ticket.photos.length > 0 && (
           <div className="grid grid-cols-2 sm:grid-cols-3 gap-3 pt-2">
             {ticket.photos.map((url) => (
