@@ -1,465 +1,413 @@
 // src/pages/Tickets.jsx
-import React, { useEffect, useMemo, useRef, useState } from "react";
+import React, { useEffect, useMemo, useState } from "react";
+import { Link, useLocation, useNavigate, useParams } from "react-router-dom";
 import { supabase } from "../lib/supabase";
 import StatusBadge from "../components/StatusBadge";
 import PriorityBadge from "../components/PriorityBadge";
 
-const CATS = ["Elétrica","Hidráulica","Mobiliário","Climatização","Limpeza","Outros"];
-const MAX_PHOTOS = 5;
-const BUCKET_NAME = "chamados-fotos"; // bucket do Supabase
+const STATUS = {
+  OPEN: "em_aberto",
+  INPROG: "em_processamento",
+  DONE: "resolvido",
+};
 
-/** Comprime imagem no cliente (≈1280px, jpeg 0.7) com fallback */
-async function compressImage(file, maxSize = 1280, quality = 0.7) {
-  try {
-    const img = await new Promise((res, rej) => {
-      const i = new Image();
-      i.onload = () => res(i);
-      i.onerror = rej;
-      i.src = URL.createObjectURL(file);
-    });
+export default function Tickets() {
+  const { id } = useParams();
+  const location = useLocation();
+  const navigate = useNavigate();
 
-    let { width, height } = img;
-    if (width > height && width > maxSize) { height = (maxSize / width) * height; width = maxSize; }
-    else if (height > width && height > maxSize) { width = (maxSize / height) * width; height = maxSize; }
-    else if (width === height && width > maxSize) { width = height = maxSize; }
+  const isNew = location.pathname.endsWith("/novo") || location.pathname.endsWith("/new");
+  const isView = !!id && !isNew;
+  const isList = !isNew && !isView;
 
-    const canvas = document.createElement("canvas");
-    canvas.width = Math.round(width);
-    canvas.height = Math.round(height);
-    const ctx = canvas.getContext("2d");
-    ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+  if (isNew) return <TicketNew onSaved={(newId) => navigate(`/app/chamados/${newId}`)} />;
+  if (isView) return <TicketView id={id} />;
 
-    const blob = await new Promise((res) => canvas.toBlob(res, "image/jpeg", quality));
-    // Fallback: se toBlob falhar em algum device, usa o original
-    if (!blob) return file;
-
-    return new File([blob], `${Date.now()}.jpg`, { type: "image/jpeg" });
-  } catch {
-    // Fallback total: retorna o arquivo original se algo der errado
-    return file;
-  }
+  return <TicketList />;
 }
 
-/** Envia fotos ao Storage e retorna URLs públicas */
-async function uploadPhotos(ticketId, files) {
-  const urls = [];
-  for (const f of files.slice(0, MAX_PHOTOS)) {
-    const compressed = await compressImage(f);
-    const path = `ticket_${ticketId}/${Date.now()}_${Math.random().toString(36).slice(2)}.jpg`;
-    const { error } = await supabase.storage.from(BUCKET_NAME).upload(path, compressed, {
-      contentType: "image/jpeg",
-      upsert: true,
-    });
-    if (error) throw new Error(error.message || "Falha no upload");
-    const { data } = supabase.storage.from(BUCKET_NAME).getPublicUrl(path);
-    urls.push(data.publicUrl);
-  }
-  return urls;
-}
+/* ========================= LISTA ========================= */
+function TicketList() {
+  const [tickets, setTickets] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const navigate = useNavigate();
 
-function Thumbs({ files }) {
-  if (!files?.length) return null;
+  useEffect(() => {
+    let mounted = true;
+    async function fetchAll() {
+      setLoading(true);
+      const { data, error } = await supabase
+        .from("tickets")
+        .select("id, title, description, status, priority, room_id, created_at")
+        .order("created_at", { ascending: false });
+      if (error) console.error(error);
+      if (mounted) {
+        setTickets(Array.isArray(data) ? data : []);
+        setLoading(false);
+      }
+    }
+    fetchAll();
+
+    const ch = supabase
+      .channel("tickets_list_changes")
+      .on("postgres_changes", { event: "*", schema: "public", table: "tickets" }, fetchAll)
+      .subscribe();
+
+    return () => supabase.removeChannel(ch);
+  }, []);
+
   return (
-    <div className="flex gap-2 flex-wrap mt-2">
-      {Array.from(files).slice(0, MAX_PHOTOS).map((f, i) => (
-        <img key={i} src={URL.createObjectURL(f)} alt="" className="h-16 w-16 object-cover rounded border" />
-      ))}
+    <div className="space-y-6">
+      <header className="flex items-center justify-between gap-3">
+        <div>
+          <h1 className="text-xl sm:text-2xl font-semibold">Chamados</h1>
+          <p className="text-sm text-slate-500">Gerencie os chamados cadastrados.</p>
+        </div>
+        <button
+          onClick={() => navigate("/app/chamados/novo")}
+          className="inline-flex items-center gap-2 rounded-xl bg-blue-600 px-4 py-2 text-white shadow hover:bg-blue-700"
+        >
+          <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" viewBox="0 0 24 24" fill="currentColor"><path d="M11 11V5a1 1 0 1 1 2 0v6h6a1 1 0 1 1 0 2h-6v6a1 1 0 1 1-2 0v-6H5a1 1 0 1 1 0-2h6z"/></svg>
+          Novo Chamado
+        </button>
+      </header>
+
+      <div className="rounded-2xl border bg-white p-4 shadow-sm">
+        {loading ? (
+          <div className="text-sm text-slate-500">Carregando...</div>
+        ) : tickets.length === 0 ? (
+          <div className="text-sm text-slate-500">Nenhum chamado encontrado.</div>
+        ) : (
+          <ul className="divide-y">
+            {tickets.map((t) => (
+              <li key={t.id} className="py-3 flex items-start gap-3">
+                <div className="flex-1 min-w-0">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <Link to={`/app/chamados/${t.id}`} className="font-medium hover:underline truncate">
+                      {t.title || `Chamado #${t.id}`}
+                    </Link>
+                    <StatusBadge status={t.status || STATUS.OPEN} />
+                    {t.priority && <PriorityBadge value={t.priority} />}
+                  </div>
+                  {t.description && (
+                    <p className="text-sm text-slate-600 line-clamp-2 mt-1">{t.description}</p>
+                  )}
+                  <div className="text-xs text-slate-500 mt-1">
+                    Criado em {new Date(t.created_at).toLocaleString()}
+                  </div>
+                </div>
+                <Link
+                  to={`/app/chamados/${t.id}`}
+                  className="self-center text-sm border rounded-lg px-3 py-1 hover:bg-slate-50"
+                >
+                  Abrir
+                </Link>
+              </li>
+            ))}
+          </ul>
+        )}
+      </div>
     </div>
   );
 }
 
-export default function Tickets() {
-  const [tickets, setTickets] = useState([]);
+/* ========================= NOVO ========================= */
+function TicketNew({ onSaved }) {
   const [rooms, setRooms] = useState([]);
-  const [filter, setFilter] = useState({ q: "", status: "todos", priority: "todas" });
-  const [creating, setCreating] = useState(false);
-  const [detail, setDetail] = useState(null);
+  const [loadingRooms, setLoadingRooms] = useState(true);
 
-  const [form, setForm] = useState({ room_id: "", category: CATS[0], priority: "media", title: "", description: "" });
-  const [newPhotos, setNewPhotos] = useState([]);        // fotos do formulário de criação
-  const [comment, setComment] = useState("");
-  const [detailPhotos, setDetailPhotos] = useState([]);  // fotos no painel de detalhe
+  const [title, setTitle] = useState("");
+  const [description, setDescription] = useState("");
+  const [priority, setPriority] = useState("media"); // baixa | media | alta
+  const [category, setCategory] = useState("");
+  const [selectedFloor, setSelectedFloor] = useState(""); // etapa 1
+  const [selectedRoomId, setSelectedRoomId] = useState(null); // etapa 2
+  const [saving, setSaving] = useState(false);
 
-  // refs pros inputs "invisíveis"
-  const galleryCreateRef = useRef(null);
-  const cameraCreateRef  = useRef(null);
-  const galleryDetailRef = useRef(null);
-  const cameraDetailRef  = useRef(null);
-
-  useEffect(() => { load(); }, []);
-
-  async function load() {
-    const { data: roomsData } = await supabase.from("rooms").select("*").order("code", { ascending: true });
-    setRooms(roomsData || []);
-    const { data: ticketsData } = await supabase.from("tickets").select("*").order("created_at", { ascending: false });
-    setTickets(ticketsData || []);
-  }
-
-  const filtered = useMemo(() => tickets.filter(t => {
-    const matchQ = (t.title + t.description + t.category).toLowerCase().includes(filter.q.toLowerCase());
-    const matchS = filter.status === "todos" ? true : t.status === filter.status;
-    const matchP = filter.priority === "todas" ? true : t.priority === filter.priority;
-    return matchQ && matchS && matchP;
-  }), [tickets, filter]);
-
-  /** Junta arquivos novos ao estado (seguro p/ mobile e inputs múltiplos) */
-  function appendFiles(setter, fileList, inputEl) {
-    const incoming = Array.from(fileList || []);
-    setter(prev => [...prev, ...incoming].slice(0, MAX_PHOTOS));
-    // limpa o input para permitir escolher o mesmo arquivo novamente se precisar
-    if (inputEl) inputEl.value = "";
-  }
-
-  async function createTicket(e) {
-    e.preventDefault();
-    if (!form.room_id) { alert("Selecione um quarto."); return; }
-
-    const dueHours = form.priority === "alta" ? 24 : form.priority === "media" ? 48 : 72;
-    const { data: { user } } = await supabase.auth.getUser();
-
-    const { data, error } = await supabase.from("tickets")
-      .insert({
-        ...form,
-        created_by: user.id,
-        status: "em_aberto",
-        due_at: new Date(Date.now() + dueHours * 3600 * 1000).toISOString(),
-      })
-      .select("id").single();
-
-    if (error) { alert("Erro ao salvar: " + error.message); return; }
-
-    if (newPhotos.length) {
-      try {
-        const urls = await uploadPhotos(data.id, newPhotos);
-        for (const url of urls) {
-          await supabase.from("ticket_updates").insert({
-            ticket_id: data.id, comment: "Foto anexada", created_by: user.id, photo_url: url,
-          });
-        }
-      } catch (err) {
-        alert("Erro ao enviar fotos: " + (err.message || "desconhecido"));
+  useEffect(() => {
+    let mounted = true;
+    async function fetchRooms() {
+      setLoadingRooms(true);
+      const { data, error } = await supabase
+        .from("rooms")
+        .select("id, code, floor")
+        .order("floor", { ascending: true })
+        .order("code", { ascending: true });
+      if (error) console.error(error);
+      if (mounted) {
+        setRooms(Array.isArray(data) ? data : []);
+        setLoadingRooms(false);
       }
     }
+    fetchRooms();
+    return () => { mounted = false; };
+  }, []);
 
-    setCreating(false);
-    setForm({ room_id: "", category: CATS[0], priority: "media", title: "", description: "" });
-    setNewPhotos([]);
-    await load();
+  // lista única de andares/locais (etapa 1)
+  const floorOptions = useMemo(() => {
+    const vals = rooms.map((r) => (r.floor || "").trim()).filter(Boolean);
+    return Array.from(new Set(vals)).sort((a, b) => a.localeCompare(b));
+  }, [rooms]);
+
+  // lista de códigos filtrados pelo andar/setor escolhido (etapa 2)
+  const roomOptions = useMemo(() => {
+    if (!selectedFloor) return [];
+    return rooms.filter((r) => (r.floor || "").trim() === selectedFloor);
+  }, [rooms, selectedFloor]);
+
+  function onChangeFloor(value) {
+    setSelectedFloor(value);
+    setSelectedRoomId(null); // limpa a segunda etapa
   }
 
-  async function updateStatus(ticket, newStatus) {
-    const { error } = await supabase.from("tickets")
-      .update({ status: newStatus, closed_at: newStatus === "resolvido" ? new Date().toISOString() : null })
-      .eq("id", ticket.id);
-    if (error) { alert("Erro ao atualizar status: " + error.message); return; }
+  async function handleCreate(e) {
+    e.preventDefault();
+    if (!title.trim() || !selectedRoomId) return;
 
-    await supabase.from("ticket_updates").insert({
-      ticket_id: ticket.id,
-      old_status: ticket.status,
-      new_status: newStatus,
-      comment: newStatus === "resolvido" ? "Resolvido" : "Status atualizado",
-      created_by: (await supabase.auth.getUser()).data.user.id,
-    });
-    await load();
-    setDetail(null);
-  }
+    const payload = {
+      title: title.trim(),
+      description: description.trim(),
+      priority,
+      status: STATUS.OPEN, // novo sempre abre em "em_aberto"
+      room_id: selectedRoomId,
+      category: category.trim() || null,
+    };
 
-  async function addUpdate(ticket) {
-    const { data: { user } } = await supabase.auth.getUser();
+    setSaving(true);
+    const { data, error } = await supabase
+      .from("tickets")
+      .insert(payload)
+      .select("id")
+      .single();
+    setSaving(false);
 
-    if (comment.trim()) {
-      const { error } = await supabase.from("ticket_updates")
-        .insert({ ticket_id: ticket.id, comment, created_by: user.id });
-      if (error) { alert("Erro ao adicionar comentário: " + error.message); return; }
+    if (error) {
+      console.error("Erro ao criar chamado:", error);
+      alert("Não foi possível salvar o chamado.");
+      return;
     }
 
-    if (detailPhotos.length) {
-      try {
-        const urls = await uploadPhotos(ticket.id, detailPhotos);
-        for (const url of urls) {
-          await supabase.from("ticket_updates").insert({
-            ticket_id: ticket.id, comment: "Foto anexada", created_by: user.id, photo_url: url,
-          });
-        }
-      } catch (err) { alert("Erro ao enviar fotos: " + (err.message || "desconhecido")); }
-    }
-
-    setComment("");
-    setDetailPhotos([]);
-    alert("Atualização enviada ✅");
+    if (onSaved && data?.id) onSaved(data.id);
   }
 
   return (
-    <div className="space-y-4">
-      {/* LISTA / FILTROS */}
-      {!creating && !detail && (
-        <>
-          <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+    <div className="space-y-6">
+      <header className="flex items-center justify-between gap-3">
+        <div>
+          <h1 className="text-xl sm:text-2xl font-semibold">Novo Chamado</h1>
+          <p className="text-sm text-slate-500">Registre um novo chamado de manutenção.</p>
+        </div>
+      </header>
+
+      <div className="rounded-2xl border bg-white p-4 shadow-sm">
+        <form onSubmit={handleCreate} className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+          {/* Título */}
+          <div className="sm:col-span-2">
+            <label className="block text-sm font-medium text-slate-700 mb-1">Título</label>
             <input
-              className="border rounded-lg px-3 py-2 w-full"
-              placeholder="Buscar por título ou descrição"
-              value={filter.q}
-              onChange={(e) => setFilter({ ...filter, q: e.target.value })}
+              type="text"
+              value={title}
+              onChange={(e) => setTitle(e.target.value)}
+              placeholder="Ex.: Vaso sanitário com vazamento"
+              className="w-full rounded-lg border px-3 py-2 text-sm focus:ring-2 focus:ring-slate-900/10"
+              required
             />
-            <select
-              className="border rounded-lg px-3 py-2"
-              value={filter.status}
-              onChange={(e) => setFilter({ ...filter, status: e.target.value })}
-            >
-              <option value="todos">Todos os status</option>
-              <option value="em_aberto">Em aberto</option>
-              <option value="em_processamento">Em processamento</option>
-              <option value="resolvido">Resolvido</option>
-            </select>
-            <div className="flex gap-2">
+          </div>
+
+          {/* Etapa 1: Andar / Setor / Local */}
+          <div className="sm:col-span-1">
+            <label className="block text-sm font-medium text-slate-700 mb-1">
+              Andar / Setor / Local
+            </label>
+            {loadingRooms ? (
+              <div className="text-sm text-slate-500">Carregando locais...</div>
+            ) : (
               <select
-                className="border rounded-lg px-3 py-2 flex-1"
-                value={filter.priority}
-                onChange={(e) => setFilter({ ...filter, priority: e.target.value })}
+                value={selectedFloor}
+                onChange={(e) => onChangeFloor(e.target.value)}
+                className="w-full rounded-lg border px-3 py-2 text-sm bg-white focus:ring-2 focus:ring-slate-900/10"
+                required
               >
-                <option value="todas">Todas prioridades</option>
-                <option value="baixa">Baixa</option>
-                <option value="media">Média</option>
-                <option value="alta">Alta</option>
+                <option value="">Selecione</option>
+                {floorOptions.map((f) => (
+                  <option key={f} value={f}>
+                    {f}
+                  </option>
+                ))}
               </select>
-              <button onClick={() => setCreating(true)} className="bg-slate-900 text-white rounded-lg px-3 py-2 shrink-0">
-                Novo chamado
-              </button>
-            </div>
-          </div>
-
-          {/* Cards mobile */}
-          <ul className="md:hidden space-y-3">
-            {filtered.map((t) => (
-              <li key={t.id} className="rounded-xl border bg-white p-3 shadow-sm">
-                <div className="flex items-center justify-between gap-2">
-                  <div className="font-semibold">#{t.id} • {rooms.find((r) => r.id === t.room_id)?.code || "—"}</div>
-                  <StatusBadge status={t.status} />
-                </div>
-                <div className="text-sm text-slate-600 mt-1">
-                  {t.category} • <PriorityBadge value={t.priority} />
-                </div>
-                <div className="text-sm mt-1">{t.title || "—"}</div>
-                <div className="text-xs text-slate-500 mt-2">{new Date(t.created_at).toLocaleString()}</div>
-                <div className="flex gap-2 justify-end mt-3">
-                  <button className="border rounded-lg px-3 py-1.5 text-sm" onClick={() => setDetail(t)}>Visualizar</button>
-                  <button className="border rounded-lg px-3 py-1.5 text-sm" onClick={() => updateStatus(t, "em_processamento")}>Resolvendo</button>
-                  <button className="border rounded-lg px-3 py-1.5 text-sm" onClick={() => updateStatus(t, "resolvido")}>Resolvido</button>
-                </div>
-              </li>
-            ))}
-            {filtered.length === 0 && (
-              <li className="text-center text-sm text-slate-600">Nenhum chamado encontrado.</li>
             )}
-          </ul>
-
-          {/* Tabela desktop */}
-          <div className="hidden md:block rounded-2xl overflow-hidden border bg-white shadow-sm">
-            <div className="overflow-x-auto">
-              <table className="w-full text-sm">
-                <thead className="bg-slate-50 text-slate-600">
-                  <tr>
-                    <th className="text-left p-3">ID</th>
-                    <th className="text-left p-3">Quarto</th>
-                    <th className="text-left p-3">Título</th>
-                    <th className="text-left p-3">Categoria</th>
-                    <th className="text-left p-3">Prioridade</th>
-                    <th className="text-left p-3">Status</th>
-                    <th className="text-left p-3">Aberto em</th>
-                    <th className="text-right p-3">Ações</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {filtered.map((t) => (
-                    <tr key={t.id} className="border-b last:border-0 hover:bg-slate-50">
-                      <td className="p-3">#{t.id}</td>
-                      <td className="p-3 font-medium">{rooms.find((r) => r.id === t.room_id)?.code || "—"}</td>
-                      <td className="p-3">{t.title || "—"}</td>
-                      <td className="p-3">{t.category}</td>
-                      <td className="p-3"><PriorityBadge value={t.priority} /></td>
-                      <td className="p-3"><StatusBadge status={t.status} /></td>
-                      <td className="p-3">{new Date(t.created_at).toLocaleString()}</td>
-                      <td className="p-3 text-right">
-                        <div className="flex gap-2 justify-end">
-                          <button className="border rounded-lg px-3 py-1.5 text-sm" onClick={() => setDetail(t)}>Visualizar</button>
-                          <button className="border rounded-lg px-3 py-1.5 text-sm" onClick={() => updateStatus(t, "em_processamento")}>Resolvendo</button>
-                          <button className="border rounded-lg px-3 py-1.5 text-sm" onClick={() => updateStatus(t, "resolvido")}>Resolvido</button>
-                        </div>
-                      </td>
-                    </tr>
-                  ))}
-                  {filtered.length === 0 && (
-                    <tr><td className="p-3 text-center" colSpan={8}>Nenhum chamado encontrado.</td></tr>
-                  )}
-                </tbody>
-              </table>
-            </div>
-          </div>
-        </>
-      )}
-
-      {/* Formulário de criação */}
-      {creating && (
-        <form onSubmit={createTicket} className="bg-white border rounded-2xl p-4 shadow-sm space-y-4">
-          <div className="text-lg font-semibold">Novo chamado</div>
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            <div className="space-y-1">
-              <label className="text-sm text-slate-600">Quarto</label>
-              <select className="border rounded-lg px-3 py-2 w-full" value={form.room_id}
-                onChange={(e) => setForm({ ...form, room_id: Number(e.target.value) })} required>
-                <option value="">Selecione...</option>
-                {rooms.map((r) => (<option key={r.id} value={r.id}>{r.code} — andar {r.floor}</option>))}
-              </select>
-            </div>
-
-            <div className="space-y-1">
-              <label className="text-sm text-slate-600">Categoria</label>
-              <select className="border rounded-lg px-3 py-2 w-full" value={form.category}
-                onChange={(e) => setForm({ ...form, category: e.target.value })}>
-                {CATS.map((c) => (<option key={c} value={c}>{c}</option>))}
-              </select>
-            </div>
-
-            <div className="space-y-1">
-              <label className="text-sm text-slate-600">Prioridade</label>
-              <select className="border rounded-lg px-3 py-2 w-full" value={form.priority}
-                onChange={(e) => setForm({ ...form, priority: e.target.value })}>
-                <option value="baixa">Baixa</option><option value="media">Média</option><option value="alta">Alta</option>
-              </select>
-            </div>
-
-            <div className="space-y-1">
-              <label className="text-sm text-slate-600">Título (opcional)</label>
-              <input className="border rounded-lg px-3 py-2 w-full" value={form.title}
-                onChange={(e) => setForm({ ...form, title: e.target.value })} placeholder="Ex: Tomada solta" />
-            </div>
-
-            <div className="md:col-span-2 space-y-1">
-              <label className="text-sm text-slate-600">Descrição</label>
-              <textarea rows={4} className="border rounded-lg px-3 py-2 w-full" value={form.description}
-                onChange={(e) => setForm({ ...form, description: e.target.value })} required />
-            </div>
-
-            {/* FOTOS: dois botões (Galeria / Câmera) */}
-            <div className="md:col-span-2">
-              <label className="text-sm text-slate-600 block mb-1">Fotos (até 5)</label>
-
-              <div className="flex gap-2 mb-2">
-                <button type="button" className="border rounded-lg px-3 py-2" onClick={() => galleryCreateRef.current?.click()}>
-                  Escolher da galeria
-                </button>
-                <button type="button" className="border rounded-lg px-3 py-2" onClick={() => cameraCreateRef.current?.click()}>
-                  Tirar foto agora
-                </button>
-              </div>
-
-              {/* inputs escondidos */}
-              <input
-                ref={galleryCreateRef}
-                type="file"
-                accept="image/*"
-                multiple
-                className="hidden"
-                onChange={(e) => appendFiles(setNewPhotos, e.target.files, e.target)}
-              />
-              <input
-                ref={cameraCreateRef}
-                type="file"
-                accept="image/*"
-                capture="environment"
-                className="hidden"
-                onChange={(e) => appendFiles(setNewPhotos, e.target.files, e.target)}
-              />
-
-              <Thumbs files={newPhotos} />
-              <p className="text-xs text-slate-500 mt-1">As imagens serão comprimidas antes do envio.</p>
-            </div>
           </div>
 
-          <div className="flex gap-2 justify-end">
-            <button type="button" className="border rounded-lg px-3 py-2"
-              onClick={() => { setCreating(false); setNewPhotos([]); }}>
-              Cancelar
+          {/* Etapa 2: Número / Identificação (filtrado pelo passo 1) */}
+          <div className="sm:col-span-1">
+            <label className="block text-sm font-medium text-slate-700 mb-1">
+              Número / Identificação
+            </label>
+            <select
+              value={selectedRoomId || ""}
+              onChange={(e) => setSelectedRoomId(e.target.value ? Number(e.target.value) : null)}
+              className="w-full rounded-lg border px-3 py-2 text-sm bg-white focus:ring-2 focus:ring-slate-900/10"
+              required
+              disabled={!selectedFloor}
+            >
+              <option value="">{selectedFloor ? "Selecione" : "Escolha um Andar/Setor primeiro"}</option>
+              {roomOptions.map((r) => (
+                <option key={r.id} value={r.id}>
+                  {r.code}
+                </option>
+              ))}
+            </select>
+          </div>
+
+          {/* Categoria (opcional) */}
+          <div className="sm:col-span-1">
+            <label className="block text-sm font-medium text-slate-700 mb-1">Categoria (opcional)</label>
+            <input
+              type="text"
+              value={category}
+              onChange={(e) => setCategory(e.target.value)}
+              placeholder="Hidráulica, Elétrica, Marcenaria..."
+              className="w-full rounded-lg border px-3 py-2 text-sm focus:ring-2 focus:ring-slate-900/10"
+            />
+          </div>
+
+          {/* Prioridade */}
+          <div className="sm:col-span-1">
+            <label className="block text-sm font-medium text-slate-700 mb-1">Prioridade</label>
+            <select
+              value={priority}
+              onChange={(e) => setPriority(e.target.value)}
+              className="w-full rounded-lg border px-3 py-2 text-sm bg-white focus:ring-2 focus:ring-slate-900/10"
+            >
+              <option value="baixa">Baixa</option>
+              <option value="media">Média</option>
+              <option value="alta">Alta</option>
+            </select>
+          </div>
+
+          {/* Descrição */}
+          <div className="sm:col-span-2">
+            <label className="block text-sm font-medium text-slate-700 mb-1">Descrição</label>
+            <textarea
+              value={description}
+              onChange={(e) => setDescription(e.target.value)}
+              placeholder="Detalhe o problema, acesso, horários, observações..."
+              rows={4}
+              className="w-full rounded-lg border px-3 py-2 text-sm focus:ring-2 focus:ring-slate-900/10"
+            />
+          </div>
+
+          {/* Ações */}
+          <div className="sm:col-span-2 flex items-center gap-2">
+            <button
+              type="submit"
+              disabled={saving}
+              className="inline-flex items-center gap-2 rounded-xl bg-blue-600 px-4 py-2 text-white text-sm shadow hover:bg-blue-700 disabled:opacity-60"
+            >
+              {saving ? "Salvando..." : "Salvar Chamado"}
             </button>
-            <button className="bg-slate-900 text-white rounded-lg px-3 py-2">Salvar chamado</button>
+            <Link to="/app/chamados" className="text-sm text-slate-600 hover:underline">
+              Cancelar
+            </Link>
           </div>
         </form>
-      )}
+      </div>
+    </div>
+  );
+}
 
-      {/* Detalhe */}
-      {detail && (
-        <div className="space-y-4">
-          <button className="text-slate-600 underline" onClick={() => setDetail(null)}>← Voltar</button>
-          <div className="rounded-2xl border bg-white p-4 shadow-sm space-y-3">
-            <div className="flex items-center gap-3">
-              <div className="text-lg font-semibold">Chamado #{detail.id}</div>
-              <StatusBadge status={detail.status} />
-            </div>
+/* ========================= VISUALIZAR ========================= */
+function TicketView({ id }) {
+  const [ticket, setTicket] = useState(null);
+  const [room, setRoom] = useState(null);
+  const [loading, setLoading] = useState(true);
 
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              <div><div className="text-xs text-slate-500">Categoria</div><div className="font-medium">{detail.category}</div></div>
-              <div><div className="text-xs text-slate-500">Prioridade</div><div className="font-medium"><PriorityBadge value={detail.priority} /></div></div>
-              <div><div className="text-xs text-slate-500">Aberto em</div><div className="font-medium">{new Date(detail.created_at).toLocaleString()}</div></div>
-              <div><div className="text-xs text-slate-500">Responsável</div><div className="font-medium">{detail.assignee_id || "—"}</div></div>
-            </div>
+  useEffect(() => {
+    let mounted = true;
 
-            <div><div className="text-xs text-slate-500">Descrição</div><div className="font-medium text-slate-700">{detail.description || "—"}</div></div>
+    async function fetchData() {
+      setLoading(true);
+      const { data: t, error: e1 } = await supabase
+        .from("tickets")
+        .select("*")
+        .eq("id", id)
+        .single();
+      if (e1) console.error(e1);
 
-            <div className="flex flex-wrap gap-2">
-              {detail.status !== "em_processamento" && (
-                <button className="border rounded-lg px-3 py-2" onClick={() => updateStatus(detail, "em_processamento")}>
-                  Resolvendo
-                </button>
-              )}
-              {detail.status !== "resolvido" && (
-                <button className="bg-slate-900 text-white rounded-lg px-3 py-2" onClick={() => updateStatus(detail, "resolvido")}>
-                  Resolvido
-                </button>
-              )}
-            </div>
+      let r = null;
+      if (t?.room_id) {
+        const { data: roomData } = await supabase
+          .from("rooms")
+          .select("id, code, floor, notes")
+          .eq("id", t.room_id)
+          .single();
+        r = roomData || null;
+      }
 
-            {/* Atualização + fotos */}
-            <div className="pt-2 space-y-2">
-              <div className="text-sm font-medium text-slate-700">Adicionar atualização</div>
-              <input className="border rounded-lg px-3 py-2 w-full" placeholder="Comentário"
-                value={comment} onChange={(e) => setComment(e.target.value)} />
+      if (mounted) {
+        setTicket(t || null);
+        setRoom(r);
+        setLoading(false);
+      }
+    }
 
-              <div className="flex gap-2">
-                <button type="button" className="border rounded-lg px-3 py-2" onClick={() => galleryDetailRef.current?.click()}>
-                  Galeria
-                </button>
-                <button type="button" className="border rounded-lg px-3 py-2" onClick={() => cameraDetailRef.current?.click()}>
-                  Câmera
-                </button>
-              </div>
+    fetchData();
 
-              {/* inputs escondidos */}
-              <input
-                ref={galleryDetailRef}
-                type="file"
-                accept="image/*"
-                multiple
-                className="hidden"
-                onChange={(e) => appendFiles(setDetailPhotos, e.target.files, e.target)}
-              />
-              <input
-                ref={cameraDetailRef}
-                type="file"
-                accept="image/*"
-                capture="environment"
-                className="hidden"
-                onChange={(e) => appendFiles(setDetailPhotos, e.target.files, e.target)}
-              />
+    const ch = supabase
+      .channel("ticket_view_changes")
+      .on("postgres_changes", { event: "*", schema: "public", table: "tickets", filter: `id=eq.${id}` }, fetchData)
+      .subscribe();
 
-              <Thumbs files={detailPhotos} />
+    return () => supabase.removeChannel(ch);
+  }, [id]);
 
-              <div className="flex justify-end">
-                <button className="border rounded-lg px-3 py-2" onClick={() => addUpdate(detail)}>Enviar</button>
-              </div>
-            </div>
+  if (loading) {
+    return <div className="text-sm text-slate-500">Carregando...</div>;
+  }
+  if (!ticket) {
+    return <div className="text-sm text-slate-500">Chamado não encontrado.</div>;
+  }
+
+  return (
+    <div className="space-y-6">
+      <header className="flex items-center justify-between gap-3">
+        <div>
+          <h1 className="text-xl sm:text-2xl font-semibold">
+            {ticket.title || `Chamado #${ticket.id}`}
+          </h1>
+          <div className="flex flex-wrap items-center gap-2 mt-1">
+            <StatusBadge status={ticket.status} />
+            {ticket.priority && <PriorityBadge value={ticket.priority} />}
           </div>
         </div>
-      )}
+        <Link
+          to="/app/chamados"
+          className="text-sm border rounded-lg px-3 py-1 hover:bg-slate-50"
+        >
+          Voltar
+        </Link>
+      </header>
+
+      <div className="rounded-2xl border bg-white p-4 shadow-sm space-y-3">
+        <div className="text-sm text-slate-600 whitespace-pre-wrap">
+          {ticket.description || "Sem descrição."}
+        </div>
+
+        <div className="text-sm text-slate-700">
+          <span className="font-medium">Categoria:</span>{" "}
+          {ticket.category || "—"}
+        </div>
+
+        <div className="text-sm text-slate-700">
+          <span className="font-medium">Local:</span>{" "}
+          {room ? `${room.floor} • ${room.code}` : "—"}
+        </div>
+
+        <div className="text-xs text-slate-500">
+          Criado em {new Date(ticket.created_at).toLocaleString()}
+          {ticket.updated_at ? ` · Atualizado em ${new Date(ticket.updated_at).toLocaleString()}` : ""}
+        </div>
+      </div>
     </div>
   );
 }
