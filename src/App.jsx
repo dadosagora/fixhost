@@ -26,7 +26,7 @@ export default function App() {
 
   return (
     <div style={{ padding: 16 }}>
-      <h1>Teste de Upload de Fotos</h1>
+      <h1>FixHost – Upload de Fotos (PROD)</h1>
       <FixHostPhotoPicker
         ticketId={REAL_TICKET_ID}
         currentUrls={urls}
