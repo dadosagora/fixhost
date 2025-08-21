@@ -4,21 +4,17 @@ import { supabase } from "../lib/supabase";
 import StatCard from "../components/StatCard";
 import StatusBadge from "../components/StatusBadge";
 import PriorityBadge from "../components/PriorityBadge";
+import TicketUpdateModal from "../components/TicketUpdateModal";
 
-const STATUS = {
-  OPEN: "em_aberto",
-  INPROG: "em_processamento",
-  DONE: "resolvido",
-};
+const STATUS = { OPEN: "em_aberto", INPROG: "em_processamento", DONE: "resolvido" };
+const BUCKET = "tickets";
 
 function daysSinceLabel(dateStr) {
   const d = new Date(dateStr);
   if (Number.isNaN(d.getTime())) return "—";
-  const ms = Date.now() - d.getTime();
-  const days = Math.max(0, Math.floor(ms / 86400000));
+  const days = Math.max(0, Math.floor((Date.now() - d.getTime()) / 86400000));
   return days === 0 ? "hoje" : `${days} dia${days > 1 ? "s" : ""}`;
 }
-
 function nextStatus(current) {
   if (current === STATUS.OPEN) return STATUS.INPROG;
   if (current === STATUS.INPROG) return STATUS.DONE;
@@ -37,6 +33,11 @@ export default function Dashboard() {
   const [loading, setLoading] = useState(true);
   const [activeFilter, setActiveFilter] = useState(STATUS.OPEN);
   const [mutatingId, setMutatingId] = useState(null);
+
+  // modal
+  const [modalOpen, setModalOpen] = useState(false);
+  const [modalTicket, setModalTicket] = useState(null);
+  const [modalNext, setModalNext] = useState(null);
 
   useEffect(() => {
     let mounted = true;
@@ -62,11 +63,7 @@ export default function Dashboard() {
 
     const channel = supabase
       .channel("tickets_dashboard_changes")
-      .on(
-        "postgres_changes",
-        { event: "*", schema: "public", table: "tickets" },
-        fetchAll
-      )
+      .on("postgres_changes", { event: "*", schema: "public", table: "tickets" }, fetchAll)
       .subscribe();
 
     return () => {
@@ -95,17 +92,85 @@ export default function Dashboard() {
 
   const roomCode = (id) => rooms.find((r) => r.id === id)?.code || "—";
 
-  async function handleAdvance(t) {
-    if (!t?.id) return;
+  function openAdvanceModal(t) {
     const ns = nextStatus(t.status || STATUS.OPEN);
-    if ((t.status || STATUS.OPEN) === STATUS.DONE) return;
+    setModalTicket(t);
+    setModalNext(ns);
+    setModalOpen(true);
+  }
+
+  async function uploadUpdatePhotos(filesOrBlobs, ticketId) {
+    if (!filesOrBlobs || filesOrBlobs.length === 0) return [];
+    const out = [];
+    for (let i = 0; i < filesOrBlobs.length && i < 5; i++) {
+      const file = filesOrBlobs[i];
+      const ext =
+        typeof file?.name === "string" && file.name.includes(".") ? file.name.split(".").pop() : "jpg";
+      const path = `updates/${ticketId}/${new Date().toISOString().slice(0,10)}/${
+        crypto.randomUUID?.() || Math.random().toString(36).slice(2)
+      }.${ext}`;
+
+      let blob = file;
+      if (!(file instanceof Blob) && typeof file === "string" && file.startsWith("data:")) {
+        const res = await fetch(file);
+        blob = await res.blob();
+      }
+
+      const { error } = await supabase.storage.from(BUCKET).upload(path, blob, {
+        cacheControl: "3600",
+        upsert: false,
+      });
+      if (error) throw new Error(`Falha ao enviar imagem: ${error.message}`);
+
+      const { data: pub } = await supabase.storage.from(BUCKET).getPublicUrl(path);
+      out.push({ path, url: pub?.publicUrl || null });
+    }
+    return out;
+  }
+
+  async function submitAdvance({ note, photos }) {
+    const t = modalTicket;
+    const ns = modalNext;
+    if (!t || !ns) return;
+
     try {
       setMutatingId(t.id);
-      const { error } = await supabase
+
+      // pega usuário
+      const { data: userData, error: userErr } = await supabase.auth.getUser();
+      if (userErr) throw userErr;
+      const user = userData?.user;
+      if (!user?.id) throw new Error("Sessão expirada. Faça login novamente.");
+
+      // upload das fotos do update
+      const photosMeta = await uploadUpdatePhotos(photos, t.id);
+
+      // salva histórico
+      const payloadUpdate = {
+        ticket_id: t.id,
+        status_after: ns,
+        note: note || null,
+        photos: photosMeta.length ? photosMeta : null,
+        created_by: user.id,
+        created_by_email: user.email || null,
+      };
+      const { error: upErr } = await supabase.from("ticket_updates").insert(payloadUpdate);
+      if (upErr) throw upErr;
+
+      // muda status do ticket
+      const { error: tErr } = await supabase
         .from("tickets")
-        .update({ status: ns, updated_at: new Date().toISOString() })
-        .eq("id", t.id);
-      if (error) console.error(error);
+        .update({ status: ns })
+        .eq("id", t.id)
+        .select("id")
+        .single();
+      if (tErr) throw tErr;
+
+      // otimista na lista
+      setTickets((prev) => prev.map((x) => (x.id === t.id ? { ...x, status: ns } : x)));
+    } catch (e) {
+      console.error(e);
+      alert(e?.message || "Falha ao avançar status");
     } finally {
       setMutatingId(null);
     }
@@ -181,10 +246,7 @@ export default function Dashboard() {
               <li key={t.id} className="py-3 flex items-start gap-3">
                 <div className="flex-1 min-w-0">
                   <div className="flex flex-wrap items-center gap-2">
-                    <Link
-                      to={`/app/chamados/${t.id}`}
-                      className="font-medium hover:underline truncate"
-                    >
+                    <Link to={`/app/chamados/${t.id}`} className="font-medium hover:underline truncate">
                       {t.title || `Chamado #${t.id}`}
                     </Link>
                     <StatusBadge status={t.status || STATUS.OPEN} />
@@ -204,12 +266,12 @@ export default function Dashboard() {
                 {/* Ações rápidas */}
                 <div className="flex flex-col sm:flex-row gap-2 self-center">
                   <button
-                    onClick={() => handleAdvance(t)}
+                    onClick={(e) => { e.preventDefault(); e.stopPropagation(); openAdvanceModal(t); }}
                     disabled={(t.status || STATUS.OPEN) === STATUS.DONE || mutatingId === t.id}
                     className="text-xs sm:text-sm rounded-lg px-3 py-1 border bg-white hover:bg-slate-50 disabled:opacity-60"
                     title={nextStatusLabel(t.status || STATUS.OPEN)}
                   >
-                    {nextStatusLabel(t.status || STATUS.OPEN)}
+                    {mutatingId === t.id ? "Atualizando..." : nextStatusLabel(t.status || STATUS.OPEN)}
                   </button>
                   <Link
                     to={`/app/chamados/${t.id}?edit=1`}
@@ -224,6 +286,15 @@ export default function Dashboard() {
           </ul>
         )}
       </div>
+
+      {/* Modal de atualização */}
+      <TicketUpdateModal
+        open={modalOpen}
+        title={modalTicket ? (modalNext === STATUS.DONE ? "Resolver chamado" : "Processar chamado") : "Atualizar chamado"}
+        confirmLabel={modalTicket ? (modalNext === STATUS.DONE ? "Resolver" : "Processar") : "Salvar"}
+        onClose={() => setModalOpen(false)}
+        onSubmit={submitAdvance}
+      />
     </div>
   );
 }
