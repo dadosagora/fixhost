@@ -1,6 +1,6 @@
 // src/pages/Tickets.jsx
 import React, { useEffect, useMemo, useState } from "react";
-import { Link, useLocation, useNavigate, useParams } from "react-router-dom";
+import { Link, useLocation, useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { supabase } from "../lib/supabase";
 import StatusBadge from "../components/StatusBadge";
 import PriorityBadge from "../components/PriorityBadge";
@@ -11,14 +11,35 @@ const STATUS = {
   INPROG: "em_processamento",
   DONE: "resolvido",
 };
+const BUCKET = "tickets";
 
-// Helper: "há X dias" (0 => "hoje")
+// Helpers
 function daysSinceLabel(dateStr) {
   const d = new Date(dateStr);
   if (Number.isNaN(d.getTime())) return "—";
   const ms = Date.now() - d.getTime();
   const days = Math.max(0, Math.floor(ms / 86400000));
   return days === 0 ? "hoje" : `${days} dia${days > 1 ? "s" : ""}`;
+}
+function nextStatus(current) {
+  if (current === STATUS.OPEN) return STATUS.INPROG;
+  if (current === STATUS.INPROG) return STATUS.DONE;
+  return STATUS.DONE;
+}
+function nextStatusLabel(current) {
+  if (current === STATUS.OPEN) return "Processar";
+  if (current === STATUS.INPROG) return "Resolver";
+  return "Resolvido";
+}
+function extractPathFromSupabaseUrl(url) {
+  if (typeof url !== "string") return null;
+  // public
+  let m = url.match(/\/storage\/v1\/object\/public\/([^/]+)\/(.+)$/);
+  if (m) return { bucket: m[1], path: m[2] };
+  // signed
+  m = url.match(/\/storage\/v1\/object\/sign\/([^/]+)\/([^?]+)\?/);
+  if (m) return { bucket: m[1], path: m[2] };
+  return null;
 }
 
 export default function Tickets() {
@@ -39,6 +60,7 @@ export default function Tickets() {
 function TicketList() {
   const [tickets, setTickets] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [mutatingId, setMutatingId] = useState(null);
   const navigate = useNavigate();
 
   useEffect(() => {
@@ -64,6 +86,22 @@ function TicketList() {
 
     return () => supabase.removeChannel(ch);
   }, []);
+
+  async function handleAdvance(t) {
+    if (!t?.id) return;
+    const ns = nextStatus(t.status || STATUS.OPEN);
+    if ((t.status || STATUS.OPEN) === STATUS.DONE) return;
+    try {
+      setMutatingId(t.id);
+      const { error } = await supabase
+        .from("tickets")
+        .update({ status: ns, updated_at: new Date().toISOString() })
+        .eq("id", t.id);
+      if (error) console.error(error);
+    } finally {
+      setMutatingId(null);
+    }
+  }
 
   return (
     <div className="space-y-6">
@@ -106,12 +144,25 @@ function TicketList() {
                     {t.status !== STATUS.DONE && <> · Aberto há {daysSinceLabel(t.created_at)}</>}
                   </div>
                 </div>
-                <Link
-                  to={`/app/chamados/${t.id}`}
-                  className="self-center text-sm border rounded-lg px-3 py-1 hover:bg-slate-50"
-                >
-                  Abrir
-                </Link>
+
+                {/* Ações rápidas */}
+                <div className="flex flex-col sm:flex-row gap-2 self-center">
+                  <button
+                    onClick={() => handleAdvance(t)}
+                    disabled={(t.status || STATUS.OPEN) === STATUS.DONE || mutatingId === t.id}
+                    className="text-xs sm:text-sm rounded-lg px-3 py-1 border bg-white hover:bg-slate-50 disabled:opacity-60"
+                    title={nextStatusLabel(t.status || STATUS.OPEN)}
+                  >
+                    {nextStatusLabel(t.status || STATUS.OPEN)}
+                  </button>
+                  <Link
+                    to={`/app/chamados/${t.id}?edit=1`}
+                    className="text-xs sm:text-sm rounded-lg px-3 py-1 border bg-white hover:bg-slate-50 text-slate-700 text-center"
+                    title="Editar"
+                  >
+                    Editar
+                  </Link>
+                </div>
               </li>
             ))}
           </ul>
@@ -128,10 +179,10 @@ function TicketNew({ onSaved }) {
 
   const [title, setTitle] = useState("");
   const [description, setDescription] = useState("");
-  const [priority, setPriority] = useState("media"); // baixa | media | alta
-  const [category, setCategory] = useState("Geral"); // nunca nulo
-  const [selectedFloor, setSelectedFloor] = useState(""); // etapa 1
-  const [selectedRoomId, setSelectedRoomId] = useState(null); // etapa 2 (bigint)
+  const [priority, setPriority] = useState("media");
+  const [category, setCategory] = useState("Geral");
+  const [selectedFloor, setSelectedFloor] = useState("");
+  const [selectedRoomId, setSelectedRoomId] = useState(null);
 
   const [photos, setPhotos] = useState([]);
   const [saving, setSaving] = useState(false);
@@ -171,17 +222,19 @@ function TicketNew({ onSaved }) {
     setSelectedRoomId(null);
   }
 
-  // Upload e retorno de METADADOS (path + url se público)
+  // Upload + metadata {path, url}
   async function uploadPhotosIfAny(filesOrBlobs) {
     if (!filesOrBlobs || filesOrBlobs.length === 0) return [];
     const uploaded = [];
     for (let i = 0; i < filesOrBlobs.length && i < 5; i++) {
       const file = filesOrBlobs[i];
-      const ext = typeof file?.name === "string" && file.name.includes(".")
-        ? file.name.split(".").pop()
-        : "jpg";
-      // dentro do bucket "tickets" guardamos em uma pasta por data
-      const path = `${new Date().toISOString().slice(0,10)}/${crypto.randomUUID()}.${ext}`;
+      const ext =
+        typeof file?.name === "string" && file.name.includes(".")
+          ? file.name.split(".").pop()
+          : "jpg";
+      const path = `${new Date().toISOString().slice(0, 10)}/${
+        crypto.randomUUID?.() || Math.random().toString(36).slice(2)
+      }.${ext}`;
 
       let toUpload = file;
       if (!(file instanceof Blob) && typeof file === "string" && file.startsWith("data:")) {
@@ -189,14 +242,13 @@ function TicketNew({ onSaved }) {
         toUpload = await res.blob();
       }
 
-      const { error: upErr } = await supabase.storage.from("tickets").upload(path, toUpload, {
+      const { error: upErr } = await supabase.storage.from(BUCKET).upload(path, toUpload, {
         cacheControl: "3600",
         upsert: false,
       });
       if (upErr) throw new Error(`Falha ao enviar imagem: ${upErr.message}`);
 
-      // Tenta gerar publicUrl (funciona se bucket for público)
-      const { data: pub } = supabase.storage.from("tickets").getPublicUrl(path);
+      const { data: pub } = await supabase.storage.from(BUCKET).getPublicUrl(path);
       uploaded.push({ path, url: pub?.publicUrl || null });
     }
     return uploaded;
@@ -206,32 +258,22 @@ function TicketNew({ onSaved }) {
     e.preventDefault();
     setErrorMsg("");
 
-    if (!title.trim()) {
-      setErrorMsg("Informe o título.");
-      return;
-    }
-    if (!selectedRoomId) {
-      setErrorMsg("Selecione o local (andar/setor e número/identificação).");
-      return;
-    }
+    if (!title.trim()) return setErrorMsg("Informe o título.");
+    if (!selectedRoomId) return setErrorMsg("Selecione o local (andar/setor e número/identificação).");
 
     try {
       setSaving(true);
 
-      // 1) usuário logado (para created_by)
       const { data: userData, error: userErr } = await supabase.auth.getUser();
       if (userErr) throw userErr;
       const user = userData?.user;
       if (!user?.id) throw new Error("Sessão expirada. Faça login novamente.");
 
-      // 2) room_id bigint
       const roomId = Number(selectedRoomId);
       if (!Number.isFinite(roomId)) throw new Error("ID do local inválido.");
 
-      // 3) upload fotos
-      const photosMeta = await uploadPhotosIfAny(photos); // [{path, url|null}]
+      const photosMeta = await uploadPhotosIfAny(photos);
 
-      // 4) payload
       const payload = {
         title: title.trim(),
         description: description.trim(),
@@ -239,11 +281,10 @@ function TicketNew({ onSaved }) {
         status: STATUS.OPEN,
         room_id: roomId,
         category: (category ?? "").trim() || "Geral",
-        photos: photosMeta.length ? photosMeta : null, // jsonb (array de objetos)
+        photos: photosMeta.length ? photosMeta : null,
         created_by: user.id,
       };
 
-      // 5) insert
       const { data, error } = await supabase
         .from("tickets")
         .insert(payload)
@@ -290,7 +331,7 @@ function TicketNew({ onSaved }) {
             />
           </div>
 
-          {/* Etapa 1: Andar / Setor / Local */}
+          {/* Etapa 1 */}
           <div className="sm:col-span-1">
             <label className="block text-sm font-medium text-slate-700 mb-1">
               Andar / Setor / Local
@@ -312,7 +353,7 @@ function TicketNew({ onSaved }) {
             )}
           </div>
 
-          {/* Etapa 2: Número / Identificação (filtrado) */}
+          {/* Etapa 2 */}
           <div className="sm:col-span-1">
             <label className="block text-sm font-medium text-slate-700 mb-1">
               Número / Identificação
@@ -376,11 +417,7 @@ function TicketNew({ onSaved }) {
             <label className="block text-sm font-medium text-slate-700 mb-2">
               Fotos (até 5) — câmera ou galeria
             </label>
-            <FixHostPhotoPicker
-              maxPhotos={5}
-              value={photos}
-              onChange={setPhotos}
-            />
+            <FixHostPhotoPicker maxPhotos={5} value={photos} onChange={setPhotos} />
           </div>
 
           {/* Ações */}
@@ -402,23 +439,36 @@ function TicketNew({ onSaved }) {
   );
 }
 
-/* ========================= VISUALIZAR ========================= */
+/* ========================= VISUALIZAR / EDITAR ========================= */
 function TicketView({ id }) {
   const [ticket, setTicket] = useState(null);
   const [room, setRoom] = useState(null);
-  const [photoUrls, setPhotoUrls] = useState([]); // URLs resolvidas (públicas ou assinadas)
+  const [photoUrls, setPhotoUrls] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [photoWarn, setPhotoWarn] = useState(false);
+  const [searchParams] = useSearchParams();
+
+  // edição
+  const [isEditing, setIsEditing] = useState(false);
+  const [form, setForm] = useState({
+    title: "",
+    category: "",
+    priority: "media",
+    status: STATUS.OPEN,
+    description: "",
+  });
+  const [saving, setSaving] = useState(false);
+
+  useEffect(() => {
+    setIsEditing(searchParams.get("edit") === "1");
+  }, [searchParams]);
 
   useEffect(() => {
     let mounted = true;
 
     async function fetchData() {
       setLoading(true);
-      const { data: t } = await supabase
-        .from("tickets")
-        .select("*")
-        .eq("id", id)
-        .single();
+      const { data: t } = await supabase.from("tickets").select("*").eq("id", id).single();
 
       let r = null;
       if (t?.room_id) {
@@ -430,38 +480,42 @@ function TicketView({ id }) {
         r = roomData || null;
       }
 
-      // Resolve URLs das fotos (suporta formatos antigos e novos)
       async function resolvePhotos(input) {
         if (!Array.isArray(input) || input.length === 0) return [];
         const out = await Promise.all(
           input.map(async (item) => {
-            // Caso antigo: string URL direta
             if (typeof item === "string") {
-              if (item.startsWith("http")) return item; // pública
-              // se veio somente o path (sem http)
-              const { data, error } = await supabase
-                .storage
-                .from("tickets")
-                .createSignedUrl(item, 60 * 60 * 24 * 7); // 7 dias
-              if (error) {
-                console.warn("Erro ao assinar foto:", error?.message);
-                return null;
+              if (item.startsWith("http")) {
+                const parsed = extractPathFromSupabaseUrl(item);
+                if (parsed?.bucket && parsed?.path) {
+                  const { data, error } = await supabase
+                    .storage.from(parsed.bucket)
+                    .createSignedUrl(parsed.path, 60 * 60 * 24 * 7);
+                  if (!error && data?.signedUrl) return data.signedUrl;
+                }
+                return item;
               }
-              return data?.signedUrl || null;
+              const { data, error } = await supabase
+                .storage.from(BUCKET)
+                .createSignedUrl(item, 60 * 60 * 24 * 7);
+              return error ? null : data?.signedUrl || null;
             }
-            // Novo formato: { path, url }
             if (item && typeof item === "object") {
-              if (item.url && String(item.url).startsWith("http")) return item.url;
+              if (item.url && String(item.url).startsWith("http")) {
+                const parsed = extractPathFromSupabaseUrl(item.url);
+                if (parsed?.bucket && parsed?.path) {
+                  const { data, error } = await supabase
+                    .storage.from(parsed.bucket)
+                    .createSignedUrl(parsed.path, 60 * 60 * 24 * 7);
+                  if (!error && data?.signedUrl) return data.signedUrl;
+                }
+                return item.url;
+              }
               if (item.path) {
                 const { data, error } = await supabase
-                  .storage
-                  .from("tickets")
+                  .storage.from(BUCKET)
                   .createSignedUrl(item.path, 60 * 60 * 24 * 7);
-                if (error) {
-                  console.warn("Erro ao assinar foto:", error?.message);
-                  return null;
-                }
-                return data?.signedUrl || null;
+                return error ? null : data?.signedUrl || null;
               }
             }
             return null;
@@ -476,6 +530,17 @@ function TicketView({ id }) {
         setTicket(t || null);
         setRoom(r);
         setPhotoUrls(urls);
+        setPhotoWarn(Array.isArray(t?.photos) && t.photos.length > 0 && urls.length === 0);
+
+        // preencher form
+        setForm({
+          title: t?.title || "",
+          category: t?.category || "",
+          priority: t?.priority || "media",
+          status: t?.status || STATUS.OPEN,
+          description: t?.description || "",
+        });
+
         setLoading(false);
       }
     }
@@ -488,17 +553,51 @@ function TicketView({ id }) {
       .subscribe();
 
     return () => {
-      mounted = false;
       supabase.removeChannel(ch);
+      mounted = false;
     };
   }, [id]);
 
-  if (loading) {
-    return <div className="text-sm text-slate-500">Carregando...</div>;
+  async function saveEdit() {
+    try {
+      setSaving(true);
+      const { error } = await supabase
+        .from("tickets")
+        .update({
+          title: form.title.trim(),
+          category: (form.category ?? "").trim(),
+          priority: form.priority,
+          status: form.status,
+          description: form.description.trim(),
+          updated_at: new Date().toISOString(),
+        })
+        .eq("id", id);
+      if (error) throw error;
+      setIsEditing(false);
+    } catch (e) {
+      console.error(e);
+      alert(e.message || "Falha ao salvar alterações");
+    } finally {
+      setSaving(false);
+    }
   }
-  if (!ticket) {
-    return <div className="text-sm text-slate-500">Chamado não encontrado.</div>;
+
+  async function advanceFromView() {
+    const ns = nextStatus(form.status);
+    try {
+      setSaving(true);
+      const { error } = await supabase
+        .from("tickets")
+        .update({ status: ns, updated_at: new Date().toISOString() })
+        .eq("id", id);
+      if (!error) setForm((f) => ({ ...f, status: ns }));
+    } finally {
+      setSaving(false);
+    }
   }
+
+  if (loading) return <div className="text-sm text-slate-500">Carregando...</div>;
+  if (!ticket) return <div className="text-sm text-slate-500">Chamado não encontrado.</div>;
 
   return (
     <div className="space-y-6">
@@ -508,16 +607,26 @@ function TicketView({ id }) {
             {ticket.title || `Chamado #${ticket.id}`}
           </h1>
           <div className="flex flex-wrap items-center gap-2 mt-1">
-            <StatusBadge status={ticket.status} />
-            {ticket.priority && <PriorityBadge value={ticket.priority} />}
+            <StatusBadge status={form.status} />
+            {ticket.priority && <PriorityBadge value={form.priority} />}
           </div>
         </div>
-        <Link
-          to="/app/chamados"
-          className="text-sm border rounded-lg px-3 py-1 hover:bg-slate-50"
-        >
-          Voltar
-        </Link>
+        <div className="flex items-center gap-2">
+          {!isEditing && (
+            <button
+              onClick={() => setIsEditing(true)}
+              className="text-sm border rounded-lg px-3 py-1 hover:bg-slate-50"
+            >
+              Editar
+            </button>
+          )}
+          <Link
+            to="/app/chamados"
+            className="text-sm border rounded-lg px-3 py-1 hover:bg-slate-50"
+          >
+            Voltar
+          </Link>
+        </div>
       </header>
 
       <div className="rounded-2xl border bg-white p-4 shadow-sm space-y-3">
@@ -526,36 +635,119 @@ function TicketView({ id }) {
           {room ? `${room.floor} • ${room.code}` : "—"}
         </div>
 
-        <div className="text-sm text-slate-700">
-          <span className="font-medium">Categoria:</span>{" "}
-          {ticket.category || "—"}
-        </div>
+        {!isEditing ? (
+          <>
+            <div className="text-sm text-slate-700">
+              <span className="font-medium">Categoria:</span> {form.category || "—"}
+            </div>
+            <div className="text-sm text-slate-600 whitespace-pre-wrap">
+              {form.description || "Sem descrição."}
+            </div>
+          </>
+        ) : (
+          <>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              <div>
+                <label className="block text-sm font-medium mb-1">Título</label>
+                <input
+                  value={form.title}
+                  onChange={(e) => setForm({ ...form, title: e.target.value })}
+                  className="w-full rounded-lg border px-3 py-2 text-sm"
+                />
+              </div>
+              <div>
+                <label className="block text-sm font-medium mb-1">Categoria</label>
+                <input
+                  value={form.category}
+                  onChange={(e) => setForm({ ...form, category: e.target.value })}
+                  className="w-full rounded-lg border px-3 py-2 text-sm"
+                />
+              </div>
+              <div>
+                <label className="block text-sm font-medium mb-1">Prioridade</label>
+                <select
+                  value={form.priority}
+                  onChange={(e) => setForm({ ...form, priority: e.target.value })}
+                  className="w-full rounded-lg border px-3 py-2 text-sm bg-white"
+                >
+                  <option value="baixa">Baixa</option>
+                  <option value="media">Média</option>
+                  <option value="alta">Alta</option>
+                </select>
+              </div>
+              <div>
+                <label className="block text-sm font-medium mb-1">Status</label>
+                <select
+                  value={form.status}
+                  onChange={(e) => setForm({ ...form, status: e.target.value })}
+                  className="w-full rounded-lg border px-3 py-2 text-sm bg-white"
+                >
+                  <option value={STATUS.OPEN}>Em aberto</option>
+                  <option value={STATUS.INPROG}>Em processamento</option>
+                  <option value={STATUS.DONE}>Resolvido</option>
+                </select>
+              </div>
+              <div className="sm:col-span-2">
+                <label className="block text-sm font-medium mb-1">Descrição</label>
+                <textarea
+                  rows={4}
+                  value={form.description}
+                  onChange={(e) => setForm({ ...form, description: e.target.value })}
+                  className="w-full rounded-lg border px-3 py-2 text-sm"
+                />
+              </div>
+            </div>
 
-        <div className="text-sm text-slate-600 whitespace-pre-wrap">
-          {ticket.description || "Sem descrição."}
-        </div>
+            <div className="flex items-center gap-2">
+              <button
+                onClick={saveEdit}
+                disabled={saving}
+                className="rounded-lg bg-blue-600 text-white text-sm px-4 py-2 hover:bg-blue-700 disabled:opacity-60"
+              >
+                {saving ? "Salvando..." : "Salvar alterações"}
+              </button>
+              <button
+                onClick={() => setIsEditing(false)}
+                className="rounded-lg border text-sm px-4 py-2 hover:bg-slate-50"
+              >
+                Cancelar
+              </button>
+            </div>
+          </>
+        )}
 
-        {/* Fotos (URLs resolvidas) */}
-        {photoUrls.length > 0 && (
+        {/* Fotos */}
+        {photoUrls.length > 0 && !isEditing && (
           <div className="grid grid-cols-2 sm:grid-cols-3 gap-3 pt-2">
             {photoUrls.map((url) => (
               <a key={url} href={url} target="_blank" rel="noreferrer" className="block">
-                <img
-                  src={url}
-                  alt=""
-                  loading="lazy"
-                  className="w-full h-32 object-cover rounded-lg border"
-                />
+                <img src={url} alt="" loading="lazy" className="w-full h-32 object-cover rounded-lg border" />
               </a>
             ))}
           </div>
         )}
 
-        <div className="text-xs text-slate-500">
-          Criado em {new Date(ticket.created_at).toLocaleString()}
-          {ticket.updated_at ? ` · Atualizado em ${new Date(ticket.updated_at).toLocaleString()}` : ""}
+        {photoWarn && !isEditing && (
+          <div className="text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2">
+            Não foi possível exibir as fotos. Verifique as permissões de leitura do bucket “{BUCKET}”.
+          </div>
+        )}
+
+        <div className="flex items-center gap-2 pt-2">
+          <button
+            onClick={advanceFromView}
+            disabled={form.status === STATUS.DONE || saving}
+            className="rounded-lg border text-sm px-3 py-1 hover:bg-slate-50 disabled:opacity-60"
+            title={nextStatusLabel(form.status)}
+          >
+            {nextStatusLabel(form.status)}
+          </button>
+          <div className="ml-auto text-xs text-slate-500">
+            Criado em {new Date(ticket.created_at).toLocaleString()}
+            {ticket.updated_at ? ` · Atualizado em ${new Date(ticket.updated_at).toLocaleString()}` : ""}
+          </div>
         </div>
       </div>
     </div>
   );
-}
+    }
