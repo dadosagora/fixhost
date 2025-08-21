@@ -5,6 +5,9 @@ import { supabase } from "../lib/supabase";
 import StatusBadge from "../components/StatusBadge";
 import PriorityBadge from "../components/PriorityBadge";
 
+// ✅ Reaproveita seu componente de fotos (o mesmo usado na tela de testes)
+import FixHostPhotoPicker from "../components/FixHostPhotoPicker";
+
 const STATUS = {
   OPEN: "em_aberto",
   INPROG: "em_processamento",
@@ -18,7 +21,6 @@ export default function Tickets() {
 
   const isNew = location.pathname.endsWith("/novo") || location.pathname.endsWith("/new");
   const isView = !!id && !isNew;
-  const isList = !isNew && !isView;
 
   if (isNew) return <TicketNew onSaved={(newId) => navigate(`/app/chamados/${newId}`)} />;
   if (isView) return <TicketView id={id} />;
@@ -122,7 +124,11 @@ function TicketNew({ onSaved }) {
   const [category, setCategory] = useState("");
   const [selectedFloor, setSelectedFloor] = useState(""); // etapa 1
   const [selectedRoomId, setSelectedRoomId] = useState(null); // etapa 2
+
+  // ✅ fotos selecionadas pelo FixHostPhotoPicker (File | Blob | base64)
+  const [photos, setPhotos] = useState([]); // array de File/Blob/Base64
   const [saving, setSaving] = useState(false);
+  const [errorMsg, setErrorMsg] = useState("");
 
   useEffect(() => {
     let mounted = true;
@@ -133,11 +139,11 @@ function TicketNew({ onSaved }) {
         .select("id, code, floor")
         .order("floor", { ascending: true })
         .order("code", { ascending: true });
-      if (error) console.error(error);
       if (mounted) {
         setRooms(Array.isArray(data) ? data : []);
         setLoadingRooms(false);
       }
+      if (error) console.error(error);
     }
     fetchRooms();
     return () => { mounted = false; };
@@ -160,34 +166,81 @@ function TicketNew({ onSaved }) {
     setSelectedRoomId(null); // limpa a segunda etapa
   }
 
+  // === Upload das fotos para Supabase Storage (bucket: 'tickets') ===
+  async function uploadPhotosIfAny(filesOrBlobs) {
+    if (!filesOrBlobs || filesOrBlobs.length === 0) return [];
+
+    const uploadedUrls = [];
+    for (let i = 0; i < filesOrBlobs.length && i < 5; i++) {
+      const file = filesOrBlobs[i];
+      // Gera um nome único e uma “pasta” por data
+      const ext = typeof file.name === "string" && file.name.includes(".")
+        ? file.name.split(".").pop()
+        : "jpg";
+      const path = `tickets/${new Date().toISOString().slice(0,10)}/${crypto.randomUUID()}.${ext}`;
+
+      // Se veio base64, converte para Blob
+      let toUpload = file;
+      if (!(file instanceof Blob) && typeof file === "string" && file.startsWith("data:")) {
+        const res = await fetch(file);
+        toUpload = await res.blob();
+      }
+
+      const { error: upErr } = await supabase.storage.from("tickets").upload(path, toUpload, {
+        cacheControl: "3600",
+        upsert: false,
+      });
+      if (upErr) throw new Error(`Falha ao enviar imagem: ${upErr.message}`);
+
+      const { data: pub } = supabase.storage.from("tickets").getPublicUrl(path);
+      uploadedUrls.push(pub.publicUrl);
+    }
+    return uploadedUrls;
+  }
+
   async function handleCreate(e) {
     e.preventDefault();
-    if (!title.trim() || !selectedRoomId) return;
+    setErrorMsg("");
 
-    const payload = {
-      title: title.trim(),
-      description: description.trim(),
-      priority,
-      status: STATUS.OPEN, // novo sempre abre em "em_aberto"
-      room_id: selectedRoomId,
-      category: category.trim() || null,
-    };
-
-    setSaving(true);
-    const { data, error } = await supabase
-      .from("tickets")
-      .insert(payload)
-      .select("id")
-      .single();
-    setSaving(false);
-
-    if (error) {
-      console.error("Erro ao criar chamado:", error);
-      alert("Não foi possível salvar o chamado.");
+    if (!title.trim() || !selectedRoomId) {
+      setErrorMsg("Preencha Título e Local.");
       return;
     }
 
-    if (onSaved && data?.id) onSaved(data.id);
+    try {
+      setSaving(true);
+
+      // 1) sobe as fotos (se houver) e obtém URLs públicas
+      const photoUrls = await uploadPhotosIfAny(photos);
+
+      // 2) monta o payload conforme seu schema
+      const payload = {
+        title: title.trim(),
+        description: description.trim(),
+        priority,
+        status: STATUS.OPEN, // novo = em_aberto
+        room_id: selectedRoomId,
+        category: category.trim() || null,
+        photos: photoUrls.length ? photoUrls : null, // ⚠️ requer coluna JSONB "photos" na tabela tickets
+      };
+
+      // 3) insere
+      const { data, error } = await supabase
+        .from("tickets")
+        .insert(payload)
+        .select("id")
+        .single();
+
+      if (error) throw error;
+
+      onSaved?.(data.id);
+    } catch (err) {
+      console.error("Erro ao criar chamado:", err);
+      // Mostra a mensagem real para facilitar o diagnóstico
+      setErrorMsg(err?.message || "Não foi possível salvar o chamado.");
+    } finally {
+      setSaving(false);
+    }
   }
 
   return (
@@ -200,6 +253,12 @@ function TicketNew({ onSaved }) {
       </header>
 
       <div className="rounded-2xl border bg-white p-4 shadow-sm">
+        {errorMsg && (
+          <div className="mb-3 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
+            {errorMsg}
+          </div>
+        )}
+
         <form onSubmit={handleCreate} className="grid grid-cols-1 sm:grid-cols-2 gap-4">
           {/* Título */}
           <div className="sm:col-span-2">
@@ -208,7 +267,7 @@ function TicketNew({ onSaved }) {
               type="text"
               value={title}
               onChange={(e) => setTitle(e.target.value)}
-              placeholder="Ex.: Vaso sanitário com vazamento"
+              placeholder="Ex.: Vazamento no banheiro"
               className="w-full rounded-lg border px-3 py-2 text-sm focus:ring-2 focus:ring-slate-900/10"
               required
             />
@@ -230,15 +289,13 @@ function TicketNew({ onSaved }) {
               >
                 <option value="">Selecione</option>
                 {floorOptions.map((f) => (
-                  <option key={f} value={f}>
-                    {f}
-                  </option>
+                  <option key={f} value={f}>{f}</option>
                 ))}
               </select>
             )}
           </div>
 
-          {/* Etapa 2: Número / Identificação (filtrado pelo passo 1) */}
+          {/* Etapa 2: Número / Identificação (filtrado) */}
           <div className="sm:col-span-1">
             <label className="block text-sm font-medium text-slate-700 mb-1">
               Número / Identificação
@@ -294,6 +351,19 @@ function TicketNew({ onSaved }) {
               placeholder="Detalhe o problema, acesso, horários, observações..."
               rows={4}
               className="w-full rounded-lg border px-3 py-2 text-sm focus:ring-2 focus:ring-slate-900/10"
+            />
+          </div>
+
+          {/* FOTOS (até 5) */}
+          <div className="sm:col-span-2">
+            <label className="block text-sm font-medium text-slate-700 mb-2">
+              Fotos (até 5) — câmera ou galeria
+            </label>
+            <FixHostPhotoPicker
+              maxPhotos={5}
+              value={photos}
+              onChange={setPhotos}
+              // se o componente aceitar compressão, pode passar props aqui
             />
           </div>
 
@@ -389,8 +459,9 @@ function TicketView({ id }) {
       </header>
 
       <div className="rounded-2xl border bg-white p-4 shadow-sm space-y-3">
-        <div className="text-sm text-slate-600 whitespace-pre-wrap">
-          {ticket.description || "Sem descrição."}
+        <div className="text-sm text-slate-700">
+          <span className="font-medium">Local:</span>{" "}
+          {room ? `${room.floor} • ${room.code}` : "—"}
         </div>
 
         <div className="text-sm text-slate-700">
@@ -398,10 +469,20 @@ function TicketView({ id }) {
           {ticket.category || "—"}
         </div>
 
-        <div className="text-sm text-slate-700">
-          <span className="font-medium">Local:</span>{" "}
-          {room ? `${room.floor} • ${room.code}` : "—"}
+        <div className="text-sm text-slate-600 whitespace-pre-wrap">
+          {ticket.description || "Sem descrição."}
         </div>
+
+        {/* Mostra fotos se existirem (urls no campo JSON "photos") */}
+        {Array.isArray(ticket.photos) && ticket.photos.length > 0 && (
+          <div className="grid grid-cols-2 sm:grid-cols-3 gap-3 pt-2">
+            {ticket.photos.map((url) => (
+              <a key={url} href={url} target="_blank" rel="noreferrer" className="block">
+                <img src={url} alt="" className="w-full h-32 object-cover rounded-lg border" />
+              </a>
+            ))}
+          </div>
+        )}
 
         <div className="text-xs text-slate-500">
           Criado em {new Date(ticket.created_at).toLocaleString()}
