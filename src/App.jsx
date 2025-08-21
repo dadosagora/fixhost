@@ -2,7 +2,7 @@ import React, { useEffect, useState } from "react";
 import { createClient } from "@supabase/supabase-js";
 import FixHostPhotoPicker from "./components/FixHostPhotoPicker";
 
-const REAL_TICKET_ID = "b154723a-8304-414d-af91-63c53d4415da";
+const REAL_TICKET_ID = "b154723a-8304-414d-af91-63c53d4415da"; // seu chamado real
 const TABLE_NAME = "chamados";
 
 const supabase = createClient(
@@ -21,6 +21,7 @@ export default function App() {
         .eq("id", REAL_TICKET_ID)
         .single();
       if (!error && data?.fotos) setUrls(data.fotos);
+      else setUrls([]);
     })();
   }, []);
 
