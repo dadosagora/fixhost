@@ -1,4 +1,3 @@
-// src/pages/Tickets.jsx
 import React, { useEffect, useMemo, useState } from "react";
 import { Link, useLocation, useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { supabase } from "../lib/supabase";
@@ -6,11 +5,7 @@ import StatusBadge from "../components/StatusBadge";
 import PriorityBadge from "../components/PriorityBadge";
 import FixHostPhotoPicker from "../components/FixHostPhotoPicker";
 
-const STATUS = {
-  OPEN: "em_aberto",
-  INPROG: "em_processamento",
-  DONE: "resolvido",
-};
+const STATUS = { OPEN: "em_aberto", INPROG: "em_processamento", DONE: "resolvido" };
 const BUCKET = "tickets";
 
 // Helpers
@@ -33,10 +28,8 @@ function nextStatusLabel(current) {
 }
 function extractPathFromSupabaseUrl(url) {
   if (typeof url !== "string") return null;
-  // public
   let m = url.match(/\/storage\/v1\/object\/public\/([^/]+)\/(.+)$/);
   if (m) return { bucket: m[1], path: m[2] };
-  // signed
   m = url.match(/\/storage\/v1\/object\/sign\/([^/]+)\/([^?]+)\?/);
   if (m) return { bucket: m[1], path: m[2] };
   return null;
@@ -89,15 +82,33 @@ function TicketList() {
 
   async function handleAdvance(t) {
     if (!t?.id) return;
-    const ns = nextStatus(t.status || STATUS.OPEN);
-    if ((t.status || STATUS.OPEN) === STATUS.DONE) return;
+    const current = t.status || STATUS.OPEN;
+    if (current === STATUS.DONE) return;
+    const ns = nextStatus(current);
+
     try {
       setMutatingId(t.id);
+
+      // otimista
+      setTickets((prev) => prev.map((x) => (x.id === t.id ? { ...x, status: ns } : x)));
+
       const { error } = await supabase
         .from("tickets")
         .update({ status: ns, updated_at: new Date().toISOString() })
-        .eq("id", t.id);
-      if (error) console.error(error);
+        .eq("id", t.id)
+        .select("id")
+        .single();
+
+      if (error) {
+        // desfaz otimista
+        setTickets((prev) => prev.map((x) => (x.id === t.id ? { ...x, status: current } : x)));
+        console.error(error);
+        alert(`Não foi possível atualizar o status: ${error.message}`);
+      }
+    } catch (e) {
+      setTickets((prev) => prev.map((x) => (x.id === t.id ? { ...x, status: t.status } : x)));
+      console.error(e);
+      alert(`Falha ao processar: ${e.message}`);
     } finally {
       setMutatingId(null);
     }
@@ -148,12 +159,12 @@ function TicketList() {
                 {/* Ações rápidas */}
                 <div className="flex flex-col sm:flex-row gap-2 self-center">
                   <button
-                    onClick={() => handleAdvance(t)}
+                    onClick={(e) => { e.preventDefault(); e.stopPropagation(); handleAdvance(t); }}
                     disabled={(t.status || STATUS.OPEN) === STATUS.DONE || mutatingId === t.id}
                     className="text-xs sm:text-sm rounded-lg px-3 py-1 border bg-white hover:bg-slate-50 disabled:opacity-60"
                     title={nextStatusLabel(t.status || STATUS.OPEN)}
                   >
-                    {nextStatusLabel(t.status || STATUS.OPEN)}
+                    {mutatingId === t.id ? "Atualizando..." : nextStatusLabel(t.status || STATUS.OPEN)}
                   </button>
                   <Link
                     to={`/app/chamados/${t.id}?edit=1`}
@@ -182,6 +193,7 @@ function TicketNew({ onSaved }) {
   const [priority, setPriority] = useState("media");
   const [category, setCategory] = useState("Geral");
   const [selectedFloor, setSelectedFloor] = useState("");
+  thead 
   const [selectedRoomId, setSelectedRoomId] = useState(null);
 
   const [photos, setPhotos] = useState([]);
@@ -473,54 +485,41 @@ function TicketView({ id }) {
       let r = null;
       if (t?.room_id) {
         const { data: roomData } = await supabase
-          .from("rooms")
-          .select("id, code, floor, notes")
-          .eq("id", t.room_id)
-          .single();
+          .from("rooms").select("id, code, floor, notes").eq("id", t.room_id).single();
         r = roomData || null;
       }
 
       async function resolvePhotos(input) {
         if (!Array.isArray(input) || input.length === 0) return [];
-        const out = await Promise.all(
-          input.map(async (item) => {
-            if (typeof item === "string") {
-              if (item.startsWith("http")) {
-                const parsed = extractPathFromSupabaseUrl(item);
-                if (parsed?.bucket && parsed?.path) {
-                  const { data, error } = await supabase
-                    .storage.from(parsed.bucket)
-                    .createSignedUrl(parsed.path, 60 * 60 * 24 * 7);
-                  if (!error && data?.signedUrl) return data.signedUrl;
-                }
-                return item;
+        const out = await Promise.all(input.map(async (item) => {
+          if (typeof item === "string") {
+            if (item.startsWith("http")) {
+              const parsed = extractPathFromSupabaseUrl(item);
+              if (parsed?.bucket && parsed?.path) {
+                const { data, error } = await supabase.storage.from(parsed.bucket).createSignedUrl(parsed.path, 60 * 60 * 24 * 7);
+                if (!error && data?.signedUrl) return data.signedUrl;
               }
-              const { data, error } = await supabase
-                .storage.from(BUCKET)
-                .createSignedUrl(item, 60 * 60 * 24 * 7);
+              return item;
+            }
+            const { data, error } = await supabase.storage.from(BUCKET).createSignedUrl(item, 60 * 60 * 24 * 7);
+            return error ? null : data?.signedUrl || null;
+          }
+          if (item && typeof item === "object") {
+            if (item.url && String(item.url).startsWith("http")) {
+              const parsed = extractPathFromSupabaseUrl(item.url);
+              if (parsed?.bucket && parsed?.path) {
+                const { data, error } = await supabase.storage.from(parsed.bucket).createSignedUrl(parsed.path, 60 * 60 * 24 * 7);
+                if (!error && data?.signedUrl) return data.signedUrl;
+              }
+              return item.url;
+            }
+            if (item.path) {
+              const { data, error } = await supabase.storage.from(BUCKET).createSignedUrl(item.path, 60 * 60 * 24 * 7);
               return error ? null : data?.signedUrl || null;
             }
-            if (item && typeof item === "object") {
-              if (item.url && String(item.url).startsWith("http")) {
-                const parsed = extractPathFromSupabaseUrl(item.url);
-                if (parsed?.bucket && parsed?.path) {
-                  const { data, error } = await supabase
-                    .storage.from(parsed.bucket)
-                    .createSignedUrl(parsed.path, 60 * 60 * 24 * 7);
-                  if (!error && data?.signedUrl) return data.signedUrl;
-                }
-                return item.url;
-              }
-              if (item.path) {
-                const { data, error } = await supabase
-                  .storage.from(BUCKET)
-                  .createSignedUrl(item.path, 60 * 60 * 24 * 7);
-                return error ? null : data?.signedUrl || null;
-              }
-            }
-            return null;
-          })
-        );
+          }
+          return null;
+        }));
         return out.filter(Boolean);
       }
 
@@ -531,8 +530,6 @@ function TicketView({ id }) {
         setRoom(r);
         setPhotoUrls(urls);
         setPhotoWarn(Array.isArray(t?.photos) && t.photos.length > 0 && urls.length === 0);
-
-        // preencher form
         setForm({
           title: t?.title || "",
           category: t?.category || "",
@@ -540,7 +537,6 @@ function TicketView({ id }) {
           status: t?.status || STATUS.OPEN,
           description: t?.description || "",
         });
-
         setLoading(false);
       }
     }
@@ -583,14 +579,26 @@ function TicketView({ id }) {
   }
 
   async function advanceFromView() {
-    const ns = nextStatus(form.status);
+    const current = form.status;
+    if (current === STATUS.DONE) return;
+    const ns = nextStatus(current);
     try {
       setSaving(true);
+      // otimista
+      setForm((f) => ({ ...f, status: ns }));
       const { error } = await supabase
         .from("tickets")
         .update({ status: ns, updated_at: new Date().toISOString() })
-        .eq("id", id);
-      if (!error) setForm((f) => ({ ...f, status: ns }));
+        .eq("id", id)
+        .select("id")
+        .single();
+      if (error) {
+        setForm((f) => ({ ...f, status: current }));
+        alert(`Não foi possível atualizar o status: ${error.message}`);
+      }
+    } catch (e) {
+      setForm((f) => ({ ...f, status: current }));
+      alert(`Falha ao processar: ${e.message}`);
     } finally {
       setSaving(false);
     }
@@ -735,12 +743,12 @@ function TicketView({ id }) {
 
         <div className="flex items-center gap-2 pt-2">
           <button
-            onClick={advanceFromView}
+            onClick={(e) => { e.preventDefault(); e.stopPropagation(); advanceFromView(); }}
             disabled={form.status === STATUS.DONE || saving}
             className="rounded-lg border text-sm px-3 py-1 hover:bg-slate-50 disabled:opacity-60"
             title={nextStatusLabel(form.status)}
           >
-            {nextStatusLabel(form.status)}
+            {saving ? "Atualizando..." : nextStatusLabel(form.status)}
           </button>
           <div className="ml-auto text-xs text-slate-500">
             Criado em {new Date(ticket.created_at).toLocaleString()}
@@ -750,4 +758,4 @@ function TicketView({ id }) {
       </div>
     </div>
   );
-    }
+}
