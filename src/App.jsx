@@ -33,10 +33,13 @@ export default function App() {
               </ProtectedRoute>
             }
           >
+            {/* index de /app */}
             <Route index element={<Navigate to="dashboard" replace />} />
+
+            {/* Dashboard */}
             <Route path="dashboard" element={<Dashboard />} />
 
-            {/* === Chamados (PT/EN) === */}
+            {/* === Chamados (PT/EN) ================================ */}
             {/* Lista */}
             <Route path="chamados" element={<Tickets />} />
             <Route path="tickets" element={<Tickets />} />
@@ -47,21 +50,19 @@ export default function App() {
             <Route path="chamados/:id" element={<Tickets />} />
             <Route path="tickets/:id" element={<Tickets />} />
 
-            {/* === Quartos (PT/EN) === */}
+            {/* === Quartos (PT/EN) ================================ */}
             <Route path="quartos" element={<RoomPage />} />
             <Route path="rooms" element={<RoomPage />} />
 
-            {/* === Usuários (PT/EN) === */}
+            {/* === Usuários (PT/EN) =============================== */}
             <Route path="usuarios" element={<Users />} />
             <Route path="users" element={<Users />} />
           </Route>
 
-          {/* Fallback */}
+          {/* Fallback geral */}
           <Route path="*" element={<Navigate to="/app/dashboard" replace />} />
         </Routes>
       </AuthProvider>
     </BrowserRouter>
   );
-}
-
 }
