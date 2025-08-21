@@ -11,7 +11,6 @@ const STATUS = {
   DONE: "resolvido",
 };
 
-// Helper: "há X dias" (0 => "hoje")
 function daysSinceLabel(dateStr) {
   const d = new Date(dateStr);
   if (Number.isNaN(d.getTime())) return "—";
@@ -25,7 +24,7 @@ export default function Dashboard() {
   const [tickets, setTickets] = useState([]);
   const [rooms, setRooms] = useState([]);
   const [loading, setLoading] = useState(true);
-  const [activeFilter, setActiveFilter] = useState(STATUS.OPEN); // default: em aberto
+  const [activeFilter, setActiveFilter] = useState(STATUS.OPEN);
 
   useEffect(() => {
     let mounted = true;
@@ -49,7 +48,6 @@ export default function Dashboard() {
 
     fetchAll();
 
-    // Realtime
     const channel = supabase
       .channel("tickets_dashboard_changes")
       .on(
@@ -86,61 +84,50 @@ export default function Dashboard() {
   const roomCode = (id) => rooms.find((r) => r.id === id)?.code || "—";
 
   return (
-    <div className="space-y-6">
-      {/* Cabeçalho + ação principal */}
+    <div className="space-y-4 sm:space-y-6">
+      {/* Cabeçalho + ação principal (desktop) */}
       <div className="flex items-center justify-between gap-3">
         <div>
-          <h1 className="text-xl sm:text-2xl font-semibold">Dashboard</h1>
-          <p className="text-sm text-slate-500">Visão geral dos chamados e ações rápidas.</p>
+          <h1 className="text-lg sm:text-2xl font-semibold">Dashboard</h1>
+          <p className="text-xs sm:text-sm text-slate-500">Visão geral dos chamados e ações rápidas.</p>
         </div>
 
-        {/* Botão principal: Novo Chamado */}
+        {/* O CTA desktop fica no header do layout; aqui mantemos só para desktop grande se quiser duplicar:
         <button
           onClick={() => navigate("/app/chamados/novo")}
-          className="inline-flex items-center gap-2 rounded-xl bg-blue-600 px-4 py-2 text-white shadow hover:bg-blue-700 active:scale-[0.98]"
+          className="hidden md:inline-flex items-center gap-2 rounded-xl bg-blue-600 px-4 py-2 text-white text-sm shadow hover:bg-blue-700"
         >
-          <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" viewBox="0 0 24 24" fill="currentColor"><path d="M11 11V5a1 1 0 1 1 2 0v6h6a1 1 0 1 1 0 2h-6v6a1 1 0 1 1-2 0v-6H5a1 1 0 1 1 0-2h6z"/></svg>
-          Novo Chamado
-        </button>
+          + Novo Chamado
+        </button> */}
       </div>
 
-      {/* Cards de estatística */}
+      {/* Cards */}
       <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
         <StatCard title="Em aberto" value={stats.open} hint="Aguardando início" />
         <StatCard title="Em processamento" value={stats.inprog} hint="Em andamento" />
         <StatCard title="Resolvidos" value={stats.done} hint="Encerrados" />
       </div>
 
-      {/* Filtros + Lista de chamados */}
-      <div className="rounded-2xl border bg-white p-4 shadow-sm">
-        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 mb-4">
-          <div className="text-lg font-semibold">Chamados</div>
+      {/* Lista de chamados com filtros roláveis */}
+      <div className="rounded-2xl border bg-white p-3 sm:p-4 shadow-sm">
+        <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between mb-3">
+          <div className="text-base sm:text-lg font-semibold">Chamados</div>
 
-          <div className="inline-flex rounded-lg border overflow-hidden">
-            <FilterButton
-              active={activeFilter === STATUS.OPEN}
-              onClick={() => setActiveFilter(STATUS.OPEN)}
-            >
-              Em aberto
-            </FilterButton>
-            <FilterButton
-              active={activeFilter === STATUS.INPROG}
-              onClick={() => setActiveFilter(STATUS.INPROG)}
-            >
-              Em processamento
-            </FilterButton>
-            <FilterButton
-              active={activeFilter === STATUS.DONE}
-              onClick={() => setActiveFilter(STATUS.DONE)}
-            >
-              Resolvidos
-            </FilterButton>
-            <FilterButton
-              active={!activeFilter}
-              onClick={() => setActiveFilter(null)}
-            >
-              Todos
-            </FilterButton>
+          <div className="overflow-x-auto -mx-1">
+            <div className="inline-flex rounded-lg border bg-white overflow-hidden mx-1">
+              <FilterButton active={activeFilter === STATUS.OPEN} onClick={() => setActiveFilter(STATUS.OPEN)}>
+                Em aberto
+              </FilterButton>
+              <FilterButton active={activeFilter === STATUS.INPROG} onClick={() => setActiveFilter(STATUS.INPROG)}>
+                Em processamento
+              </FilterButton>
+              <FilterButton active={activeFilter === STATUS.DONE} onClick={() => setActiveFilter(STATUS.DONE)}>
+                Resolvidos
+              </FilterButton>
+              <FilterButton active={!activeFilter} onClick={() => setActiveFilter(null)}>
+                Todos
+              </FilterButton>
+            </div>
           </div>
         </div>
 
@@ -175,7 +162,7 @@ export default function Dashboard() {
                 </div>
                 <button
                   onClick={() => navigate(`/app/chamados/${t.id}`)}
-                  className="self-center text-sm border rounded-lg px-3 py-1 hover:bg-slate-50"
+                  className="self-center text-xs sm:text-sm border rounded-lg px-3 py-1 hover:bg-slate-50"
                 >
                   Abrir
                 </button>
@@ -191,7 +178,7 @@ export default function Dashboard() {
 function FilterButton({ active, children, onClick }) {
   return (
     <button
-      className={`px-3 py-1.5 text-sm ${
+      className={`px-3 py-1.5 text-sm whitespace-nowrap ${
         active ? "bg-slate-900 text-white" : "bg-white text-slate-700 hover:bg-slate-50"
       }`}
       onClick={onClick}
