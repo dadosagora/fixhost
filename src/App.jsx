@@ -2,7 +2,8 @@ import React, { useEffect, useState } from "react";
 import { createClient } from "@supabase/supabase-js";
 import FixHostPhotoPicker from "./components/FixHostPhotoPicker";
 
-const REAL_TICKET_ID = "b154723a-8304-414d-af91-63c53d4415da"; // seu chamado real
+// ✅ ID real do chamado (pode trocar quando for outro chamado)
+const REAL_TICKET_ID = "b154723a-8304-414d-af91-63c53d4415da";
 const TABLE_NAME = "chamados";
 
 const supabase = createClient(
@@ -21,13 +22,12 @@ export default function App() {
         .eq("id", REAL_TICKET_ID)
         .single();
       if (!error && data?.fotos) setUrls(data.fotos);
-      else setUrls([]);
     })();
   }, []);
 
   return (
     <div style={{ padding: 16 }}>
-      <h1>FixHost – Upload de Fotos (PROD)</h1>
+      <h1>FixHost – Upload de Fotos</h1>
       <FixHostPhotoPicker
         ticketId={REAL_TICKET_ID}
         currentUrls={urls}
