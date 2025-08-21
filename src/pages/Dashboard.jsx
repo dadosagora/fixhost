@@ -19,12 +19,24 @@ function daysSinceLabel(dateStr) {
   return days === 0 ? "hoje" : `${days} dia${days > 1 ? "s" : ""}`;
 }
 
+function nextStatus(current) {
+  if (current === STATUS.OPEN) return STATUS.INPROG;
+  if (current === STATUS.INPROG) return STATUS.DONE;
+  return STATUS.DONE;
+}
+function nextStatusLabel(current) {
+  if (current === STATUS.OPEN) return "Processar";
+  if (current === STATUS.INPROG) return "Resolver";
+  return "Resolvido";
+}
+
 export default function Dashboard() {
   const navigate = useNavigate();
   const [tickets, setTickets] = useState([]);
   const [rooms, setRooms] = useState([]);
   const [loading, setLoading] = useState(true);
   const [activeFilter, setActiveFilter] = useState(STATUS.OPEN);
+  const [mutatingId, setMutatingId] = useState(null);
 
   useEffect(() => {
     let mounted = true;
@@ -83,22 +95,50 @@ export default function Dashboard() {
 
   const roomCode = (id) => rooms.find((r) => r.id === id)?.code || "—";
 
+  async function handleAdvance(t) {
+    if (!t?.id) return;
+    const ns = nextStatus(t.status || STATUS.OPEN);
+    if ((t.status || STATUS.OPEN) === STATUS.DONE) return;
+    try {
+      setMutatingId(t.id);
+      const { error } = await supabase
+        .from("tickets")
+        .update({ status: ns, updated_at: new Date().toISOString() })
+        .eq("id", t.id);
+      if (error) console.error(error);
+    } finally {
+      setMutatingId(null);
+    }
+  }
+
+  async function handleLogout() {
+    await supabase.auth.signOut();
+    navigate("/login");
+  }
+
   return (
     <div className="space-y-4 sm:space-y-6">
-      {/* Cabeçalho + ação principal (desktop) */}
+      {/* Cabeçalho */}
       <div className="flex items-center justify-between gap-3">
         <div>
           <h1 className="text-lg sm:text-2xl font-semibold">Dashboard</h1>
           <p className="text-xs sm:text-sm text-slate-500">Visão geral dos chamados e ações rápidas.</p>
         </div>
-
-        {/* O CTA desktop fica no header do layout; aqui mantemos só para desktop grande se quiser duplicar:
-        <button
-          onClick={() => navigate("/app/chamados/novo")}
-          className="hidden md:inline-flex items-center gap-2 rounded-xl bg-blue-600 px-4 py-2 text-white text-sm shadow hover:bg-blue-700"
-        >
-          + Novo Chamado
-        </button> */}
+        <div className="flex items-center gap-2">
+          <button
+            onClick={() => navigate("/app/chamados/novo")}
+            className="hidden sm:inline-flex items-center gap-2 rounded-xl bg-blue-600 px-4 py-2 text-white text-sm shadow hover:bg-blue-700"
+          >
+            + Novo Chamado
+          </button>
+          <button
+            onClick={handleLogout}
+            className="inline-flex items-center gap-2 rounded-xl border border-red-300 px-4 py-2 text-red-600 text-sm hover:bg-red-50"
+            title="Sair"
+          >
+            Sair
+          </button>
+        </div>
       </div>
 
       {/* Cards */}
@@ -108,7 +148,7 @@ export default function Dashboard() {
         <StatCard title="Resolvidos" value={stats.done} hint="Encerrados" />
       </div>
 
-      {/* Lista de chamados com filtros roláveis */}
+      {/* Lista + filtros */}
       <div className="rounded-2xl border bg-white p-3 sm:p-4 shadow-sm">
         <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between mb-3">
           <div className="text-base sm:text-lg font-semibold">Chamados</div>
@@ -160,12 +200,25 @@ export default function Dashboard() {
                     {t.status !== STATUS.DONE && <> · Aberto há {daysSinceLabel(t.created_at)}</>}
                   </div>
                 </div>
-                <button
-                  onClick={() => navigate(`/app/chamados/${t.id}`)}
-                  className="self-center text-xs sm:text-sm border rounded-lg px-3 py-1 hover:bg-slate-50"
-                >
-                  Abrir
-                </button>
+
+                {/* Ações rápidas */}
+                <div className="flex flex-col sm:flex-row gap-2 self-center">
+                  <button
+                    onClick={() => handleAdvance(t)}
+                    disabled={(t.status || STATUS.OPEN) === STATUS.DONE || mutatingId === t.id}
+                    className="text-xs sm:text-sm rounded-lg px-3 py-1 border bg-white hover:bg-slate-50 disabled:opacity-60"
+                    title={nextStatusLabel(t.status || STATUS.OPEN)}
+                  >
+                    {nextStatusLabel(t.status || STATUS.OPEN)}
+                  </button>
+                  <Link
+                    to={`/app/chamados/${t.id}?edit=1`}
+                    className="text-xs sm:text-sm rounded-lg px-3 py-1 border bg-white hover:bg-slate-50 text-slate-700 text-center"
+                    title="Editar"
+                  >
+                    Editar
+                  </Link>
+                </div>
               </li>
             ))}
           </ul>
