@@ -1,38 +1,48 @@
-import React, { useEffect, useState } from "react";
-import { createClient } from "@supabase/supabase-js";
-import FixHostPhotoPicker from "./components/FixHostPhotoPicker";
+// src/App.jsx
+import React from "react";
+import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
 
-// ✅ ID real do chamado (pode trocar quando for outro chamado)
-const REAL_TICKET_ID = "b154723a-8304-414d-af91-63c53d4415da";
-const TABLE_NAME = "chamados";
+import { AuthProvider } from "./contexts/AuthContext";
+import ProtectedRoute from "./routes/ProtectedRoute";
+import AppLayout from "./layout/AppLayout";
 
-const supabase = createClient(
-  import.meta.env.VITE_SUPABASE_URL,
-  import.meta.env.VITE_SUPABASE_ANON_KEY
-);
+import Dashboard from "./pages/Dashboard";
+import Tickets from "./pages/Tickets";
+import RoomPage from "./pages/RoomPage";
+import Users from "./pages/Users";
+import Login from "./pages/Login";
 
 export default function App() {
-  const [urls, setUrls] = useState([]);
-
-  useEffect(() => {
-    (async () => {
-      const { data, error } = await supabase
-        .from(TABLE_NAME)
-        .select("fotos")
-        .eq("id", REAL_TICKET_ID)
-        .single();
-      if (!error && data?.fotos) setUrls(data.fotos);
-    })();
-  }, []);
-
   return (
-    <div style={{ padding: 16 }}>
-      <h1>FixHost – Upload de Fotos</h1>
-      <FixHostPhotoPicker
-        ticketId={REAL_TICKET_ID}
-        currentUrls={urls}
-        onSaved={(newUrls) => setUrls(newUrls)}
-      />
-    </div>
+    <BrowserRouter>
+      <AuthProvider>
+        <Routes>
+          {/* redireciona raiz para o dashboard */}
+          <Route path="/" element={<Navigate to="/app/dashboard" replace />} />
+
+          {/* login público */}
+          <Route path="/login" element={<Login />} />
+
+          {/* app protegido + layout com navegação */}
+          <Route
+            path="/app"
+            element={
+              <ProtectedRoute>
+                <AppLayout />
+              </ProtectedRoute>
+            }
+          >
+            <Route index element={<Navigate to="dashboard" replace />} />
+            <Route path="dashboard" element={<Dashboard />} />
+            <Route path="tickets" element={<Tickets />} />
+            <Route path="rooms" element={<RoomPage />} />
+            <Route path="users" element={<Users />} />
+          </Route>
+
+          {/* fallback */}
+          <Route path="*" element={<Navigate to="/app/dashboard" replace />} />
+        </Routes>
+      </AuthProvider>
+    </BrowserRouter>
   );
 }
