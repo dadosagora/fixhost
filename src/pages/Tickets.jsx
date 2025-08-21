@@ -119,7 +119,7 @@ function TicketNew({ onSaved }) {
   const [title, setTitle] = useState("");
   const [description, setDescription] = useState("");
   const [priority, setPriority] = useState("media"); // baixa | media | alta
-  const [category, setCategory] = useState("Geral"); // ✅ padrão não-nulo
+  const [category, setCategory] = useState("Geral"); // nunca nulo
   const [selectedFloor, setSelectedFloor] = useState(""); // etapa 1
   const [selectedRoomId, setSelectedRoomId] = useState(null); // etapa 2 (bigint)
 
@@ -205,24 +205,36 @@ function TicketNew({ onSaved }) {
     try {
       setSaving(true);
 
-      // garante bigint válido
+      // 1) usuário logado (para preencher created_by)
+      const { data: userData, error: userErr } = await supabase.auth.getUser();
+      if (userErr) throw userErr;
+      const user = userData?.user;
+      if (!user?.id) {
+        throw new Error("Sessão expirada. Faça login novamente.");
+      }
+
+      // 2) garante bigint válido
       const roomId = Number(selectedRoomId);
       if (!Number.isFinite(roomId)) {
         throw new Error("ID do local inválido.");
-        }
+      }
 
+      // 3) upload das fotos (se houver)
       const photoUrls = await uploadPhotosIfAny(photos);
 
+      // 4) monta payload com created_by (uuid do usuário)
       const payload = {
         title: title.trim(),
         description: description.trim(),
         priority,
         status: STATUS.OPEN,
-        room_id: roomId, // bigint
-        category: (category ?? "").trim() || "Geral", // ✅ nunca null
-        photos: photoUrls.length ? photoUrls : null,   // requer coluna jsonb 'photos'
+        room_id: roomId,                         // bigint
+        category: (category ?? "").trim() || "Geral",
+        photos: photoUrls.length ? photoUrls : null, // jsonb
+        created_by: user.id,                     // ✅ preenche NOT NULL
       };
 
+      // 5) insere
       const { data, error } = await supabase
         .from("tickets")
         .insert(payload)
@@ -312,7 +324,7 @@ function TicketNew({ onSaved }) {
             </select>
           </div>
 
-          {/* Categoria (valor padrão "Geral") */}
+          {/* Categoria */}
           <div className="sm:col-span-1">
             <label className="block text-sm font-medium text-slate-700 mb-1">Categoria</label>
             <input
