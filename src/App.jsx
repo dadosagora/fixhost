@@ -17,13 +17,13 @@ export default function App() {
     <BrowserRouter>
       <AuthProvider>
         <Routes>
-          {/* redireciona raiz para o dashboard */}
+          {/* raiz -> dashboard */}
           <Route path="/" element={<Navigate to="/app/dashboard" replace />} />
 
           {/* login público */}
           <Route path="/login" element={<Login />} />
 
-          {/* app protegido + layout com navegação */}
+          {/* área protegida */}
           <Route
             path="/app"
             element={
@@ -32,14 +32,27 @@ export default function App() {
               </ProtectedRoute>
             }
           >
+            {/* index de /app -> dashboard */}
             <Route index element={<Navigate to="dashboard" replace />} />
+
+            {/* rotas oficiais */}
             <Route path="dashboard" element={<Dashboard />} />
+
+            {/* --- ALIAS PT/EN para manter compatibilidade com o layout --- */}
+            {/* Chamados */}
+            <Route path="chamados" element={<Tickets />} />
             <Route path="tickets" element={<Tickets />} />
+
+            {/* Quartos */}
+            <Route path="quartos" element={<RoomPage />} />
             <Route path="rooms" element={<RoomPage />} />
+
+            {/* Usuários */}
+            <Route path="usuarios" element={<Users />} />
             <Route path="users" element={<Users />} />
           </Route>
 
-          {/* fallback */}
+          {/* fallback geral */}
           <Route path="*" element={<Navigate to="/app/dashboard" replace />} />
         </Routes>
       </AuthProvider>
