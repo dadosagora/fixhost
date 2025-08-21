@@ -64,7 +64,7 @@ function TicketList() {
     let mounted = true;
     async function fetchAll() {
       setLoading(true);
-      const { data, error } = await supabase
+      const { data } = await supabase
         .from("tickets")
         .select("id, title, description, status, priority, room_id, created_at")
         .order("created_at", { ascending: false });
@@ -72,7 +72,6 @@ function TicketList() {
         setTickets(Array.isArray(data) ? data : []);
         setLoading(false);
       }
-      if (error) console.error(error);
     }
     fetchAll();
 
@@ -199,7 +198,24 @@ function TicketList() {
                   </div>
                 </div>
 
+                {/* Ações */}
                 <div className="flex flex-col sm:flex-row gap-2 self-center">
+                  <Link
+                    to={`/app/chamados/${t.id}`}
+                    className="text-xs sm:text-sm rounded-lg px-3 py-1 border bg-white hover:bg-slate-50 text-slate-700 text-center"
+                    title="Visualizar"
+                  >
+                    Visualizar
+                  </Link>
+
+                  <Link
+                    to={`/app/chamados/${t.id}?edit=1`}
+                    className="text-xs sm:text-sm rounded-lg px-3 py-1 border bg-white hover:bg-slate-50 text-slate-700 text-center"
+                    title="Editar"
+                  >
+                    Editar
+                  </Link>
+
                   <button
                     onClick={(e) => { e.preventDefault(); e.stopPropagation(); openAdvanceModal(t); }}
                     disabled={(t.status || STATUS.OPEN) === STATUS.DONE || mutatingId === t.id}
@@ -208,13 +224,6 @@ function TicketList() {
                   >
                     {mutatingId === t.id ? "Atualizando..." : nextStatusLabel(t.status || STATUS.OPEN)}
                   </button>
-                  <Link
-                    to={`/app/chamados/${t.id}?edit=1`}
-                    className="text-xs sm:text-sm rounded-lg px-3 py-1 border bg-white hover:bg-slate-50 text-slate-700 text-center"
-                    title="Editar"
-                  >
-                    Editar
-                  </Link>
                 </div>
               </li>
             ))}
@@ -288,8 +297,13 @@ function TicketNew({ onSaved }) {
     const uploaded = [];
     for (let i = 0; i < filesOrBlobs.length && i < 5; i++) {
       const file = filesOrBlobs[i];
-      const ext = typeof file?.name === "string" && file.name.includes(".") ? file.name.split(".").pop() : "jpg";
-      const path = `${new Date().toISOString().slice(0,10)}/${crypto.randomUUID?.() || Math.random().toString(36).slice(2)}.${ext}`;
+      const ext =
+        typeof file?.name === "string" && file.name.includes(".")
+          ? file.name.split(".").pop()
+          : "jpg";
+      const path = `${new Date().toISOString().slice(0,10)}/${
+        crypto.randomUUID?.() || Math.random().toString(36).slice(2)
+      }.${ext}`;
 
       let toUpload = file;
       if (!(file instanceof Blob) && typeof file === "string" && file.startsWith("data:")) {
@@ -297,7 +311,10 @@ function TicketNew({ onSaved }) {
         toUpload = await res.blob();
       }
 
-      const { error: upErr } = await supabase.storage.from(BUCKET).upload(path, toUpload, { cacheControl: "3600", upsert: false });
+      const { error: upErr } = await supabase.storage.from(BUCKET).upload(path, toUpload, {
+        cacheControl: "3600",
+        upsert: false,
+      });
       if (upErr) throw new Error(`Falha ao enviar imagem: ${upErr.message}`);
 
       const { data: pub } = await supabase.storage.from(BUCKET).getPublicUrl(path);
@@ -340,7 +357,7 @@ function TicketNew({ onSaved }) {
       const { data, error } = await supabase.from("tickets").insert(payload).select("id, created_at").single();
       if (error) throw error;
 
-      // opcional: cria um registro de histórico "aberto"
+      // histórico inicial
       await supabase.from("ticket_updates").insert({
         ticket_id: data.id,
         status_after: STATUS.OPEN,
@@ -560,7 +577,6 @@ function TicketView({ id }) {
         return out.filter(Boolean);
       }
 
-      // histórico
       const { data: ups } = await supabase
         .from("ticket_updates")
         .select("id, status_after, note, photos, created_by_email, created_at")
@@ -600,39 +616,7 @@ function TicketView({ id }) {
       .subscribe();
     const ch2 = supabase
       .channel("ticket_updates_changes")
-      .on("postgres_changes", { event: "*", schema: "public", table: "ticket_updates", filter: `ticket_id=eq.${id}` }, () => {
-        // re-carrega apenas histórico
-        (async () => {
-          const { data: ups } = await supabase
-            .from("ticket_updates")
-            .select("id, status_after, note, photos, created_by_email, created_at")
-            .eq("ticket_id", id)
-            .order("created_at", { ascending: true });
-          const upsWithResolvedPhotos = await Promise.all(
-            (ups || []).map(async (u) => ({
-              ...u,
-              photoUrls: await (async () => {
-                if (!Array.isArray(u?.photos) || u.photos.length === 0) return [];
-                const out = await Promise.all(u.photos.map(async (p) => {
-                  if (typeof p === "string") {
-                    if (p.startsWith("http")) return p;
-                    const { data } = await supabase.storage.from(BUCKET).createSignedUrl(p, 60*60*24*7);
-                    return data?.signedUrl || null;
-                  }
-                  if (p?.url) return p.url;
-                  if (p?.path) {
-                    const { data } = await supabase.storage.from(BUCKET).createSignedUrl(p.path, 60*60*24*7);
-                    return data?.signedUrl || null;
-                  }
-                  return null;
-                }));
-                return out.filter(Boolean);
-              })(),
-            }))
-          );
-          setUpdates(upsWithResolvedPhotos);
-        })();
-      })
+      .on("postgres_changes", { event: "*", schema: "public", table: "ticket_updates", filter: `ticket_id=eq.${id}` }, fetchData)
       .subscribe();
 
     return () => {
@@ -709,7 +693,6 @@ function TicketView({ id }) {
 
       const photosMeta = await uploadUpdatePhotos(photos, id);
 
-      // salva histórico
       const { error: upErr } = await supabase.from("ticket_updates").insert({
         ticket_id: Number(id),
         status_after: ns,
@@ -720,7 +703,6 @@ function TicketView({ id }) {
       });
       if (upErr) throw upErr;
 
-      // atualiza status
       const { error } = await supabase
         .from("tickets")
         .update({ status: ns })
