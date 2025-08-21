@@ -1,3 +1,4 @@
+// src/layout/AppLayout.jsx
 import React from "react";
 import { NavLink, Outlet, useLocation, useNavigate } from "react-router-dom";
 
@@ -13,34 +14,17 @@ export default function AppLayout() {
       {/* HEADER */}
       <header className="sticky top-0 z-30 bg-white/90 backdrop-blur border-b">
         <div className="max-w-6xl mx-auto px-3 sm:px-6 py-2">
-          <div className="flex flex-wrap items-center gap-2 sm:gap-3">
+          {/* Linha 1 (mobile): brand + CTA desktop */}
+          <div className="flex items-center justify-between gap-2 sm:gap-3">
             {/* Brand */}
-            <div className="mr-2">
+            <div>
               <div className="text-sm sm:text-base font-semibold leading-tight">
                 <span className="block">Manutenção</span>
                 <span className="block">Cecomtur Hotel</span>
               </div>
             </div>
 
-            {/* Nav - rolagem horizontal no mobile */}
-            <nav className="flex-1 overflow-x-auto">
-              <div className="inline-flex gap-1 sm:gap-2 pr-1">
-                <TopLink to="/app/dashboard" active={isActive("/app/dashboard")}>
-                  Dashboard
-                </TopLink>
-                <TopLink to="/app/chamados" active={isActive("/app/chamados")}>
-                  Chamados
-                </TopLink>
-                <TopLink to="/app/quartos" active={isActive("/app/quartos")}>
-                  Quartos
-                </TopLink>
-                <TopLink to="/app/usuarios" active={isActive("/app/usuarios")}>
-                  Usuários
-                </TopLink>
-              </div>
-            </nav>
-
-            {/* CTA desktop (evita colidir no mobile) */}
+            {/* CTA (desktop) */}
             <button
               onClick={() => navigate("/app/chamados/novo")}
               className="hidden sm:inline-flex items-center gap-2 rounded-xl bg-blue-600 px-4 py-2 text-white text-sm shadow hover:bg-blue-700"
@@ -49,6 +33,41 @@ export default function AppLayout() {
               Novo Chamado
             </button>
           </div>
+
+          {/* Linha 2 (mobile): navegação em grade 2x2. No desktop vira inline */}
+          <nav className="mt-2">
+            {/* Desktop: inline */}
+            <div className="hidden sm:flex gap-2">
+              <TopLink to="/app/dashboard" active={isActive("/app/dashboard")}>
+                Dashboard
+              </TopLink>
+              <TopLink to="/app/chamados" active={isActive("/app/chamados")}>
+                Chamados
+              </TopLink>
+              <TopLink to="/app/quartos" active={isActive("/app/quartos")}>
+                Quartos
+              </TopLink>
+              <TopLink to="/app/usuarios" active={isActive("/app/usuarios")}>
+                Usuários
+              </TopLink>
+            </div>
+
+            {/* Mobile: grade 2x2, tudo visível sem rolar */}
+            <div className="grid grid-cols-2 gap-2 sm:hidden">
+              <TopLink to="/app/dashboard" active={isActive("/app/dashboard")} wide>
+                Dashboard
+              </TopLink>
+              <TopLink to="/app/chamados" active={isActive("/app/chamados")} wide>
+                Chamados
+              </TopLink>
+              <TopLink to="/app/quartos" active={isActive("/app/quartos")} wide>
+                Quartos
+              </TopLink>
+              <TopLink to="/app/usuarios" active={isActive("/app/usuarios")} wide>
+                Usuários
+              </TopLink>
+            </div>
+          </nav>
         </div>
       </header>
 
@@ -57,13 +76,13 @@ export default function AppLayout() {
         <Outlet />
       </main>
 
-      {/* FAB mobile */}
+      {/* FAB mobile: texto completo */}
       <button
         onClick={() => navigate("/app/chamados/novo")}
         className="sm:hidden fixed bottom-4 right-4 rounded-full bg-blue-600 text-white shadow-lg px-4 py-3 text-sm active:scale-[0.98]"
         aria-label="Novo Chamado"
       >
-        + Novo
+        + Novo Chamado
       </button>
 
       {/* FOOTER */}
@@ -76,11 +95,12 @@ export default function AppLayout() {
   );
 }
 
-function TopLink({ to, active, children }) {
+function TopLink({ to, active, children, wide = false }) {
   return (
     <NavLink
       to={to}
       className={
+        (wide ? "w-full text-center " : "") +
         "whitespace-nowrap rounded-lg px-3 py-1.5 text-sm " +
         (active
           ? "bg-slate-900 text-white"
