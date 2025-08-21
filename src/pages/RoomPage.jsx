@@ -8,12 +8,12 @@ export default function RoomPage() {
   const [saving, setSaving] = useState(false);
 
   // Campos do formulário
-  const [floor, setFloor] = useState(""); // agora texto (andar/setor/local)
-  const [code, setCode] = useState("");   // agora texto (nº/identificação)
+  const [floor, setFloor] = useState("");
+  const [code, setCode] = useState("");
+  const [notes, setNotes] = useState(""); // observação
 
   useEffect(() => {
     fetchRooms();
-    // opcional: realtime para aparecer assim que cadastrar
     const ch = supabase
       .channel("rooms_changes")
       .on("postgres_changes", { event: "*", schema: "public", table: "rooms" }, fetchRooms)
@@ -25,7 +25,7 @@ export default function RoomPage() {
     setLoading(true);
     const { data, error } = await supabase
       .from("rooms")
-      .select("id, code, floor, created_at")
+      .select("id, code, floor, notes, created_at")
       .order("code", { ascending: true });
     if (error) {
       console.error("Erro ao listar quartos:", error);
@@ -40,25 +40,24 @@ export default function RoomPage() {
 
     setSaving(true);
     const payload = {
-      // Mantém o mesmo nome de colunas já usados no app:
-      // floor: texto (ex.: "2º andar", "Recepção")
-      // code: texto (ex.: "201", "Fachada Leste")
       floor: floor.trim(),
       code: code.trim(),
+      notes: notes.trim(),
     };
 
     const { error } = await supabase.from("rooms").insert(payload);
     setSaving(false);
 
     if (error) {
-      console.error("Erro ao criar quarto:", error);
+      console.error("Erro ao criar quarto/local:", error);
       alert("Não foi possível salvar. Veja o console para detalhes.");
       return;
     }
 
-    // limpa o formulário e recarrega
+    // limpa o formulário
     setFloor("");
     setCode("");
+    setNotes("");
     fetchRooms();
   }
 
@@ -73,11 +72,11 @@ export default function RoomPage() {
         </div>
       </header>
 
-      {/* Formulário de cadastro */}
+      {/* Formulário */}
       <div className="rounded-2xl border bg-white p-4 shadow-sm">
         <h2 className="text-lg font-semibold mb-3">Novo quarto / local</h2>
         <form onSubmit={handleCreate} className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-          {/* ORDEM INVERTIDA: primeiro ANDAR/SETOR (texto), depois NÚMERO/ID (texto) */}
+          {/* Andar / setor */}
           <div className="sm:col-span-1">
             <label className="block text-sm font-medium text-slate-700 mb-1">
               Andar / Setor / Local
@@ -87,11 +86,12 @@ export default function RoomPage() {
               value={floor}
               onChange={(e) => setFloor(e.target.value)}
               placeholder="Ex.: 2º andar, Recepção, Restaurante, Fachada"
-              className="w-full rounded-lg border px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-slate-900/10"
+              className="w-full rounded-lg border px-3 py-2 text-sm focus:ring-2 focus:ring-slate-900/10"
               required
             />
           </div>
 
+          {/* Código / identificação */}
           <div className="sm:col-span-1">
             <label className="block text-sm font-medium text-slate-700 mb-1">
               Número / Identificação
@@ -101,20 +101,35 @@ export default function RoomPage() {
               value={code}
               onChange={(e) => setCode(e.target.value)}
               placeholder="Ex.: 201, 101A, Fachada Leste"
-              className="w-full rounded-lg border px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-slate-900/10"
+              className="w-full rounded-lg border px-3 py-2 text-sm focus:ring-2 focus:ring-slate-900/10"
               required
             />
           </div>
 
-            <div className="sm:col-span-1 flex items-end">
-              <button
-                type="submit"
-                disabled={saving}
-                className="w-full sm:w-auto inline-flex items-center justify-center rounded-xl bg-blue-600 px-4 py-2 text-white text-sm shadow hover:bg-blue-700 disabled:opacity-60"
-              >
-                {saving ? "Salvando..." : "Salvar"}
-              </button>
-            </div>
+          {/* Botão salvar */}
+          <div className="sm:col-span-1 flex items-end">
+            <button
+              type="submit"
+              disabled={saving}
+              className="w-full sm:w-auto inline-flex items-center justify-center rounded-xl bg-blue-600 px-4 py-2 text-white text-sm shadow hover:bg-blue-700 disabled:opacity-60"
+            >
+              {saving ? "Salvando..." : "Salvar"}
+            </button>
+          </div>
+
+          {/* Observação ocupa a linha inteira */}
+          <div className="sm:col-span-3">
+            <label className="block text-sm font-medium text-slate-700 mb-1">
+              Observação
+            </label>
+            <textarea
+              value={notes}
+              onChange={(e) => setNotes(e.target.value)}
+              placeholder="Ex.: Próximo ao elevador, área de difícil acesso..."
+              rows={3}
+              className="w-full rounded-lg border px-3 py-2 text-sm focus:ring-2 focus:ring-slate-900/10"
+            />
+          </div>
         </form>
       </div>
 
@@ -134,18 +149,19 @@ export default function RoomPage() {
         ) : (
           <ul className="divide-y">
             {rooms.map((r) => (
-              <li key={r.id} className="py-3 flex items-start justify-between gap-3">
-                <div className="min-w-0">
-                  <div className="font-medium">
-                    {r.code || "—"}
+              <li key={r.id} className="py-3 flex flex-col gap-1">
+                <div className="flex items-start justify-between">
+                  <div className="min-w-0">
+                    <div className="font-medium">{r.code || "—"}</div>
+                    <div className="text-sm text-slate-600">{r.floor || "Sem andar/setor"}</div>
                   </div>
-                  <div className="text-sm text-slate-600">
-                    {r.floor || "Sem andar/setor"}
+                  <div className="text-xs text-slate-500">
+                    {new Date(r.created_at).toLocaleString()}
                   </div>
                 </div>
-                <div className="text-xs text-slate-500">
-                  {new Date(r.created_at).toLocaleString()}
-                </div>
+                {r.notes && (
+                  <div className="text-sm text-slate-500">{r.notes}</div>
+                )}
               </li>
             ))}
           </ul>
