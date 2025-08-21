@@ -1,4 +1,3 @@
-// src/pages/Dashboard.jsx
 import React, { useEffect, useMemo, useState } from "react";
 import { useNavigate, Link } from "react-router-dom";
 import { supabase } from "../lib/supabase";
@@ -12,6 +11,15 @@ const STATUS = {
   DONE: "resolvido",
 };
 
+// Helper: "há X dias" (0 => "hoje")
+function daysSinceLabel(dateStr) {
+  const d = new Date(dateStr);
+  if (Number.isNaN(d.getTime())) return "—";
+  const ms = Date.now() - d.getTime();
+  const days = Math.max(0, Math.floor(ms / 86400000));
+  return days === 0 ? "hoje" : `${days} dia${days > 1 ? "s" : ""}`;
+}
+
 export default function Dashboard() {
   const navigate = useNavigate();
   const [tickets, setTickets] = useState([]);
@@ -24,7 +32,6 @@ export default function Dashboard() {
 
     async function fetchAll() {
       setLoading(true);
-
       const [roomsRes, ticketsRes] = await Promise.all([
         supabase.from("rooms").select("*").order("code", { ascending: true }),
         supabase
@@ -42,7 +49,7 @@ export default function Dashboard() {
 
     fetchAll();
 
-    // Realtime para manter contadores e lista atualizados
+    // Realtime
     const channel = supabase
       .channel("tickets_dashboard_changes")
       .on(
@@ -89,7 +96,7 @@ export default function Dashboard() {
 
         {/* Botão principal: Novo Chamado */}
         <button
-          onClick={() => navigate("/app/chamados")}
+          onClick={() => navigate("/app/chamados/novo")}
           className="inline-flex items-center gap-2 rounded-xl bg-blue-600 px-4 py-2 text-white shadow hover:bg-blue-700 active:scale-[0.98]"
         >
           <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" viewBox="0 0 24 24" fill="currentColor"><path d="M11 11V5a1 1 0 1 1 2 0v6h6a1 1 0 1 1 0 2h-6v6a1 1 0 1 1-2 0v-6H5a1 1 0 1 1 0-2h6z"/></svg>
@@ -104,22 +111,34 @@ export default function Dashboard() {
         <StatCard title="Resolvidos" value={stats.done} hint="Encerrados" />
       </div>
 
-      {/* Filtros + Lista de chamados (no lugar do gráfico) */}
+      {/* Filtros + Lista de chamados */}
       <div className="rounded-2xl border bg-white p-4 shadow-sm">
         <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 mb-4">
           <div className="text-lg font-semibold">Chamados</div>
 
           <div className="inline-flex rounded-lg border overflow-hidden">
-            <FilterButton active={activeFilter === STATUS.OPEN} onClick={() => setActiveFilter(STATUS.OPEN)}>
+            <FilterButton
+              active={activeFilter === STATUS.OPEN}
+              onClick={() => setActiveFilter(STATUS.OPEN)}
+            >
               Em aberto
             </FilterButton>
-            <FilterButton active={activeFilter === STATUS.INPROG} onClick={() => setActiveFilter(STATUS.INPROG)}>
+            <FilterButton
+              active={activeFilter === STATUS.INPROG}
+              onClick={() => setActiveFilter(STATUS.INPROG)}
+            >
               Em processamento
             </FilterButton>
-            <FilterButton active={activeFilter === STATUS.DONE} onClick={() => setActiveFilter(STATUS.DONE)}>
+            <FilterButton
+              active={activeFilter === STATUS.DONE}
+              onClick={() => setActiveFilter(STATUS.DONE)}
+            >
               Resolvidos
             </FilterButton>
-            <FilterButton active={!activeFilter} onClick={() => setActiveFilter(null)}>
+            <FilterButton
+              active={!activeFilter}
+              onClick={() => setActiveFilter(null)}
+            >
               Todos
             </FilterButton>
           </div>
@@ -135,21 +154,27 @@ export default function Dashboard() {
               <li key={t.id} className="py-3 flex items-start gap-3">
                 <div className="flex-1 min-w-0">
                   <div className="flex flex-wrap items-center gap-2">
-                    <Link to="/app/chamados" className="font-medium hover:underline truncate">
+                    <Link
+                      to={`/app/chamados/${t.id}`}
+                      className="font-medium hover:underline truncate"
+                    >
                       {t.title || `Chamado #${t.id}`}
                     </Link>
                     <StatusBadge status={t.status || STATUS.OPEN} />
                     {t.priority && <PriorityBadge value={t.priority} />}
                   </div>
+
                   <div className="text-sm text-slate-600 mt-1 line-clamp-2">
                     {t.category ? `${t.category} • ` : ""}{t.description || "Sem descrição"}
                   </div>
+
                   <div className="text-xs text-slate-500 mt-1">
                     Quarto: {roomCode(t.room_id)} · Criado em {new Date(t.created_at).toLocaleString()}
+                    {t.status !== STATUS.DONE && <> · Aberto há {daysSinceLabel(t.created_at)}</>}
                   </div>
                 </div>
                 <button
-                  onClick={() => navigate("/app/chamados")}
+                  onClick={() => navigate(`/app/chamados/${t.id}`)}
                   className="self-center text-sm border rounded-lg px-3 py-1 hover:bg-slate-50"
                 >
                   Abrir
@@ -166,7 +191,9 @@ export default function Dashboard() {
 function FilterButton({ active, children, onClick }) {
   return (
     <button
-      className={`px-3 py-1.5 text-sm ${active ? "bg-slate-900 text-white" : "bg-white text-slate-700 hover:bg-slate-50"}`}
+      className={`px-3 py-1.5 text-sm ${
+        active ? "bg-slate-900 text-white" : "bg-white text-slate-700 hover:bg-slate-50"
+      }`}
       onClick={onClick}
     >
       {children}
