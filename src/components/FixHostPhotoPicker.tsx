@@ -7,7 +7,7 @@ const supabase = createClient(
 );
 
 type Props = {
-  ticketId: string;           // UUID do chamado (ex.: b154723a-...)
+  ticketId: string;           // UUID do chamado
   currentUrls?: string[];     // URLs já salvas no chamado
   onSaved?: (urls: string[]) => void;
 };
@@ -212,7 +212,7 @@ export default function FixHostPhotoPicker({ ticketId, currentUrls = [], onSaved
 
       const merged = [...existing, ...okUrls].slice(0, MAX);
 
-      // grava na tabela SEM modo de teste
+      // grava na tabela (produção)
       const { error: updErr } = await supabase
         .from(TABLE_NAME)
         .update({ fotos: merged })
