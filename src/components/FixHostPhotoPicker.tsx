@@ -31,14 +31,13 @@ function readAsDataURL(file: File): Promise<string> {
   });
 }
 
-/** Converte via <img> para JPEG */
+/** Converte via <img> para JPEG (compatível com Android/iOS) */
 async function imgToJpegViaTag(file: File, maxSide = 1600, quality = 0.8): Promise<File> {
   const dataURL = await readAsDataURL(file);
   const img = new Image();
   img.decoding = "sync";
   img.loading = "eager";
   img.src = dataURL;
-
   await new Promise<void>((res, rej) => {
     img.onload = () => res();
     img.onerror = () => rej(new Error("Falha ao carregar <img>"));
@@ -66,7 +65,10 @@ async function imgToJpegViaTag(file: File, maxSide = 1600, quality = 0.8): Promi
 async function compressSafeToJpeg(file: File, maxSide = 1600, quality = 0.8): Promise<File> {
   const type = (file.type || "").toLowerCase();
   const looksSupported = /jpeg|jpg|png|webp/.test(type);
-  if (!looksSupported) return file; // HEIC/HEIF -> manda original
+  if (!looksSupported) {
+    // HEIC/HEIF e afins → envia original (Supabase aceita)
+    return file;
+  }
 
   try {
     const bmp = await createImageBitmap(file);
@@ -75,7 +77,8 @@ async function compressSafeToJpeg(file: File, maxSide = 1600, quality = 0.8): Pr
     const h = Math.round(bmp.height * scale);
 
     const canvas = document.createElement("canvas");
-    canvas.width = w; canvas.height = h;
+    canvas.width = w;
+    canvas.height = h;
     const ctx = canvas.getContext("2d")!;
     ctx.drawImage(bmp, 0, 0, w, h);
 
@@ -93,7 +96,7 @@ async function compressSafeToJpeg(file: File, maxSide = 1600, quality = 0.8): Pr
   }
 }
 
-/** Garante nome/tipo */
+/** Garante nome/tipo e evita sumiço de seleção entre galeria e câmera */
 function withSafeName(f: File) {
   const ext = (f.type?.split("/")[1] || "jpg").replace("jpeg", "jpg");
   const safe = f.name && f.name.trim().length ? f.name : `${crypto.randomUUID()}.${ext}`;
@@ -116,7 +119,6 @@ export default function FixHostPhotoPicker({ ticketId, currentUrls = [], onSaved
   function addFiles(list: FileList | null, origem: "galeria" | "camera") {
     if (!list) return;
     const incoming = Array.from(list).map(withSafeName);
-
     setPending((prev) => {
       const room = Math.max(0, MAX - (existing.length + prev.length));
       const take = incoming.slice(0, room).map((f) => ({
@@ -125,7 +127,6 @@ export default function FixHostPhotoPicker({ ticketId, currentUrls = [], onSaved
       }));
       return [...prev, ...take];
     });
-
     if (origem === "galeria" && galleryRef.current) galleryRef.current.value = "";
     if (origem === "camera" && cameraRef.current) cameraRef.current.value = "";
   }
@@ -185,7 +186,7 @@ export default function FixHostPhotoPicker({ ticketId, currentUrls = [], onSaved
     try {
       const prepared = await Promise.all(pending.map((p) => compressSafeToJpeg(p.file)));
 
-      // pasta do chamado = ticketId
+      // pasta do chamado = ticketId (oficial)
       const basePath = ticketId;
 
       const tasks = prepared.map(async (file) => {
@@ -236,7 +237,7 @@ export default function FixHostPhotoPicker({ ticketId, currentUrls = [], onSaved
     }
   }
 
-  // ---------- UI ----------
+  // ---------- UI (igual ao layout que você gostou) ----------
   const wrap: React.CSSProperties = { display: "flex", gap: 12, flexWrap: "wrap" };
   const thumbBox: React.CSSProperties = {
     position: "relative",
@@ -284,7 +285,7 @@ export default function FixHostPhotoPicker({ ticketId, currentUrls = [], onSaved
           <input
             ref={galleryRef}
             type="file"
-            accept="image/jpeg,image/png,image/webp" // evitando HEIC/HEIF
+            accept="image/*"
             multiple
             style={{ display: "none" }}
             onChange={onPickGallery}
@@ -297,7 +298,7 @@ export default function FixHostPhotoPicker({ ticketId, currentUrls = [], onSaved
           <input
             ref={cameraRef}
             type="file"
-            accept="image/jpeg,image/png,image/webp"
+            accept="image/*"
             capture="environment"
             style={{ display: "none" }}
             onChange={onPickCamera}
