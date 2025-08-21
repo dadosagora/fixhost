@@ -106,7 +106,7 @@ export default function Dashboard() {
       const file = filesOrBlobs[i];
       const ext =
         typeof file?.name === "string" && file.name.includes(".") ? file.name.split(".").pop() : "jpg";
-      const path = `updates/${ticketId}/${new Date().toISOString().slice(0,10)}/${
+      const path = `updates/${ticketId}/${new Date().toISOString().slice(0, 10)}/${
         crypto.randomUUID?.() || Math.random().toString(36).slice(2)
       }.${ext}`;
 
@@ -136,16 +136,14 @@ export default function Dashboard() {
     try {
       setMutatingId(t.id);
 
-      // pega usuário
       const { data: userData, error: userErr } = await supabase.auth.getUser();
       if (userErr) throw userErr;
       const user = userData?.user;
       if (!user?.id) throw new Error("Sessão expirada. Faça login novamente.");
 
-      // upload das fotos do update
       const photosMeta = await uploadUpdatePhotos(photos, t.id);
 
-      // salva histórico
+      // histórico
       const payloadUpdate = {
         ticket_id: t.id,
         status_after: ns,
@@ -157,7 +155,7 @@ export default function Dashboard() {
       const { error: upErr } = await supabase.from("ticket_updates").insert(payloadUpdate);
       if (upErr) throw upErr;
 
-      // muda status do ticket
+      // muda status
       const { error: tErr } = await supabase
         .from("tickets")
         .update({ status: ns })
@@ -166,7 +164,6 @@ export default function Dashboard() {
         .single();
       if (tErr) throw tErr;
 
-      // otimista na lista
       setTickets((prev) => prev.map((x) => (x.id === t.id ? { ...x, status: ns } : x)));
     } catch (e) {
       console.error(e);
@@ -246,7 +243,10 @@ export default function Dashboard() {
               <li key={t.id} className="py-3 flex items-start gap-3">
                 <div className="flex-1 min-w-0">
                   <div className="flex flex-wrap items-center gap-2">
-                    <Link to={`/app/chamados/${t.id}`} className="font-medium hover:underline truncate">
+                    <Link
+                      to={`/app/chamados/${t.id}`}
+                      className="font-medium hover:underline truncate"
+                    >
                       {t.title || `Chamado #${t.id}`}
                     </Link>
                     <StatusBadge status={t.status || STATUS.OPEN} />
@@ -265,6 +265,22 @@ export default function Dashboard() {
 
                 {/* Ações rápidas */}
                 <div className="flex flex-col sm:flex-row gap-2 self-center">
+                  <Link
+                    to={`/app/chamados/${t.id}`}
+                    className="text-xs sm:text-sm rounded-lg px-3 py-1 border bg-white hover:bg-slate-50 text-slate-700 text-center"
+                    title="Visualizar"
+                  >
+                    Visualizar
+                  </Link>
+
+                  <Link
+                    to={`/app/chamados/${t.id}?edit=1`}
+                    className="text-xs sm:text-sm rounded-lg px-3 py-1 border bg-white hover:bg-slate-50 text-slate-700 text-center"
+                    title="Editar"
+                  >
+                    Editar
+                  </Link>
+
                   <button
                     onClick={(e) => { e.preventDefault(); e.stopPropagation(); openAdvanceModal(t); }}
                     disabled={(t.status || STATUS.OPEN) === STATUS.DONE || mutatingId === t.id}
@@ -273,13 +289,6 @@ export default function Dashboard() {
                   >
                     {mutatingId === t.id ? "Atualizando..." : nextStatusLabel(t.status || STATUS.OPEN)}
                   </button>
-                  <Link
-                    to={`/app/chamados/${t.id}?edit=1`}
-                    className="text-xs sm:text-sm rounded-lg px-3 py-1 border bg-white hover:bg-slate-50 text-slate-700 text-center"
-                    title="Editar"
-                  >
-                    Editar
-                  </Link>
                 </div>
               </li>
             ))}
