@@ -119,7 +119,7 @@ function TicketNew({ onSaved }) {
   const [title, setTitle] = useState("");
   const [description, setDescription] = useState("");
   const [priority, setPriority] = useState("media"); // baixa | media | alta
-  const [category, setCategory] = useState("");
+  const [category, setCategory] = useState("Geral"); // ✅ padrão não-nulo
   const [selectedFloor, setSelectedFloor] = useState(""); // etapa 1
   const [selectedRoomId, setSelectedRoomId] = useState(null); // etapa 2 (bigint)
 
@@ -209,7 +209,7 @@ function TicketNew({ onSaved }) {
       const roomId = Number(selectedRoomId);
       if (!Number.isFinite(roomId)) {
         throw new Error("ID do local inválido.");
-      }
+        }
 
       const photoUrls = await uploadPhotosIfAny(photos);
 
@@ -218,9 +218,9 @@ function TicketNew({ onSaved }) {
         description: description.trim(),
         priority,
         status: STATUS.OPEN,
-        room_id: roomId,              // << bigint
-        category: category.trim() || null,
-        photos: photoUrls.length ? photoUrls : null, // requer coluna jsonb 'photos'
+        room_id: roomId, // bigint
+        category: (category ?? "").trim() || "Geral", // ✅ nunca null
+        photos: photoUrls.length ? photoUrls : null,   // requer coluna jsonb 'photos'
       };
 
       const { data, error } = await supabase
@@ -312,14 +312,14 @@ function TicketNew({ onSaved }) {
             </select>
           </div>
 
-          {/* Categoria (opcional) */}
+          {/* Categoria (valor padrão "Geral") */}
           <div className="sm:col-span-1">
-            <label className="block text-sm font-medium text-slate-700 mb-1">Categoria (opcional)</label>
+            <label className="block text-sm font-medium text-slate-700 mb-1">Categoria</label>
             <input
               type="text"
               value={category}
               onChange={(e) => setCategory(e.target.value)}
-              placeholder="Hidráulica, Elétrica, Marcenaria..."
+              placeholder="Ex.: Hidráulica, Elétrica, Marcenaria..."
               className="w-full rounded-lg border px-3 py-2 text-sm focus:ring-2 focus:ring-slate-900/10"
             />
           </div>
