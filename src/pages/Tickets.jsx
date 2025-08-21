@@ -171,15 +171,17 @@ function TicketNew({ onSaved }) {
     setSelectedRoomId(null);
   }
 
+  // Upload e retorno de METADADOS (path + url se público)
   async function uploadPhotosIfAny(filesOrBlobs) {
     if (!filesOrBlobs || filesOrBlobs.length === 0) return [];
-    const uploadedUrls = [];
+    const uploaded = [];
     for (let i = 0; i < filesOrBlobs.length && i < 5; i++) {
       const file = filesOrBlobs[i];
       const ext = typeof file?.name === "string" && file.name.includes(".")
         ? file.name.split(".").pop()
         : "jpg";
-      const path = `tickets/${new Date().toISOString().slice(0,10)}/${crypto.randomUUID()}.${ext}`;
+      // dentro do bucket "tickets" guardamos em uma pasta por data
+      const path = `${new Date().toISOString().slice(0,10)}/${crypto.randomUUID()}.${ext}`;
 
       let toUpload = file;
       if (!(file instanceof Blob) && typeof file === "string" && file.startsWith("data:")) {
@@ -193,10 +195,11 @@ function TicketNew({ onSaved }) {
       });
       if (upErr) throw new Error(`Falha ao enviar imagem: ${upErr.message}`);
 
+      // Tenta gerar publicUrl (funciona se bucket for público)
       const { data: pub } = supabase.storage.from("tickets").getPublicUrl(path);
-      uploadedUrls.push(pub.publicUrl);
+      uploaded.push({ path, url: pub?.publicUrl || null });
     }
-    return uploadedUrls;
+    return uploaded;
   }
 
   async function handleCreate(e) {
@@ -215,36 +218,32 @@ function TicketNew({ onSaved }) {
     try {
       setSaving(true);
 
-      // 1) usuário logado (para preencher created_by)
+      // 1) usuário logado (para created_by)
       const { data: userData, error: userErr } = await supabase.auth.getUser();
       if (userErr) throw userErr;
       const user = userData?.user;
-      if (!user?.id) {
-        throw new Error("Sessão expirada. Faça login novamente.");
-      }
+      if (!user?.id) throw new Error("Sessão expirada. Faça login novamente.");
 
-      // 2) garante bigint válido
+      // 2) room_id bigint
       const roomId = Number(selectedRoomId);
-      if (!Number.isFinite(roomId)) {
-        throw new Error("ID do local inválido.");
-      }
+      if (!Number.isFinite(roomId)) throw new Error("ID do local inválido.");
 
-      // 3) upload das fotos (se houver)
-      const photoUrls = await uploadPhotosIfAny(photos);
+      // 3) upload fotos
+      const photosMeta = await uploadPhotosIfAny(photos); // [{path, url|null}]
 
-      // 4) monta payload com created_by
+      // 4) payload
       const payload = {
         title: title.trim(),
         description: description.trim(),
         priority,
         status: STATUS.OPEN,
-        room_id: roomId, // bigint
+        room_id: roomId,
         category: (category ?? "").trim() || "Geral",
-        photos: photoUrls.length ? photoUrls : null, // jsonb
-        created_by: user.id, // uuid
+        photos: photosMeta.length ? photosMeta : null, // jsonb (array de objetos)
+        created_by: user.id,
       };
 
-      // 5) insere
+      // 5) insert
       const { data, error } = await supabase
         .from("tickets")
         .insert(payload)
@@ -407,6 +406,7 @@ function TicketNew({ onSaved }) {
 function TicketView({ id }) {
   const [ticket, setTicket] = useState(null);
   const [room, setRoom] = useState(null);
+  const [photoUrls, setPhotoUrls] = useState([]); // URLs resolvidas (públicas ou assinadas)
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
@@ -414,12 +414,11 @@ function TicketView({ id }) {
 
     async function fetchData() {
       setLoading(true);
-      const { data: t, error: e1 } = await supabase
+      const { data: t } = await supabase
         .from("tickets")
         .select("*")
         .eq("id", id)
         .single();
-      if (e1) console.error(e1);
 
       let r = null;
       if (t?.room_id) {
@@ -431,9 +430,52 @@ function TicketView({ id }) {
         r = roomData || null;
       }
 
+      // Resolve URLs das fotos (suporta formatos antigos e novos)
+      async function resolvePhotos(input) {
+        if (!Array.isArray(input) || input.length === 0) return [];
+        const out = await Promise.all(
+          input.map(async (item) => {
+            // Caso antigo: string URL direta
+            if (typeof item === "string") {
+              if (item.startsWith("http")) return item; // pública
+              // se veio somente o path (sem http)
+              const { data, error } = await supabase
+                .storage
+                .from("tickets")
+                .createSignedUrl(item, 60 * 60 * 24 * 7); // 7 dias
+              if (error) {
+                console.warn("Erro ao assinar foto:", error?.message);
+                return null;
+              }
+              return data?.signedUrl || null;
+            }
+            // Novo formato: { path, url }
+            if (item && typeof item === "object") {
+              if (item.url && String(item.url).startsWith("http")) return item.url;
+              if (item.path) {
+                const { data, error } = await supabase
+                  .storage
+                  .from("tickets")
+                  .createSignedUrl(item.path, 60 * 60 * 24 * 7);
+                if (error) {
+                  console.warn("Erro ao assinar foto:", error?.message);
+                  return null;
+                }
+                return data?.signedUrl || null;
+              }
+            }
+            return null;
+          })
+        );
+        return out.filter(Boolean);
+      }
+
+      const urls = await resolvePhotos(t?.photos);
+
       if (mounted) {
         setTicket(t || null);
         setRoom(r);
+        setPhotoUrls(urls);
         setLoading(false);
       }
     }
@@ -445,7 +487,10 @@ function TicketView({ id }) {
       .on("postgres_changes", { event: "*", schema: "public", table: "tickets", filter: `id=eq.${id}` }, fetchData)
       .subscribe();
 
-    return () => supabase.removeChannel(ch);
+    return () => {
+      mounted = false;
+      supabase.removeChannel(ch);
+    };
   }, [id]);
 
   if (loading) {
@@ -490,11 +535,17 @@ function TicketView({ id }) {
           {ticket.description || "Sem descrição."}
         </div>
 
-        {Array.isArray(ticket.photos) && ticket.photos.length > 0 && (
+        {/* Fotos (URLs resolvidas) */}
+        {photoUrls.length > 0 && (
           <div className="grid grid-cols-2 sm:grid-cols-3 gap-3 pt-2">
-            {ticket.photos.map((url) => (
+            {photoUrls.map((url) => (
               <a key={url} href={url} target="_blank" rel="noreferrer" className="block">
-                <img src={url} alt="" className="w-full h-32 object-cover rounded-lg border" />
+                <img
+                  src={url}
+                  alt=""
+                  loading="lazy"
+                  className="w-full h-32 object-cover rounded-lg border"
+                />
               </a>
             ))}
           </div>
